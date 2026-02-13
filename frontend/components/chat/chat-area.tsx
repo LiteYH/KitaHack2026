@@ -5,26 +5,15 @@ import { UiGraphLogo } from "./uigraph-logo"
 import { SuggestionCards } from "./suggestion-cards"
 import { ChatInput } from "./chat-input"
 import { MessageBubble, type Message } from "./message-bubble"
-
-const ASSISTANT_RESPONSES: Record<string, string> = {
-  "Generate marketing content for my social media campaign":
-    "I can help you generate engaging content! Let me create compelling text, eye-catching images, and video concepts for your campaign. What's your target audience and key message? I'll generate platform-optimized content for Facebook, Instagram, LinkedIn, and Twitter.",
-  "Analyze my competitors' marketing strategies":
-    "I'll scrape and analyze your competitors' content across multiple platforms. I've identified their top-performing posts, engagement patterns, and trending content. Their strategy focuses on short-form videos (68% engagement), user-generated content, and weekly contests. Would you like detailed insights?",
-  "Schedule and publish my content automatically":
-    "Your content is ready to be published! I can automatically post to Facebook, Instagram, LinkedIn, Twitter, and TikTok. Set your preferred posting schedule, and I'll optimize posting times based on your audience's activity patterns. Want to review the queue?",
-  "How can I optimize my current campaigns?":
-    "Based on your campaign data, I recommend: 1) Shift 30% budget to Instagram Reels (3x higher ROI). 2) A/B test your call-to-action buttons. 3) Reduce ad spend on Facebook by 15% and increase LinkedIn by 20%. 4) Update ad creatives - current ones are showing fatigue. Expected ROI improvement: +42%.",
-  "Show me my ROI dashboard and campaign performance":
-    "Your ROI Dashboard shows: Campaign A: $12,450 revenue, 340% ROI. Campaign B: $8,200 revenue, 280% ROI. Overall profit: $20,650 with 22% month-over-month growth. Top performing channel: Instagram (45% of conversions). Download detailed reports or view AI insights?",
-  "Monitor competitors and suggest response strategies":
-    "Continuous monitoring active! Competitor X just launched a flash sale campaign (30% off). Recommendation: Counter with a limited-time bundle offer + free shipping within 4 hours. Competitor Y's viral post gained 10K shares - I've analyzed their content style and prepared a similar template for you.",
-}
+import { sendChatMessage, type ChatMessage as APIChatMessage } from "@/lib/api/chat"
+import { useAuth } from "@/contexts/AuthContext"
 
 export function ChatArea() {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const { user } = useAuth()
 
   const showWelcome = messages.length === 0
 
@@ -32,25 +21,49 @@ export function ChatArea() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  const handleSend = (text: string) => {
+  const handleSend = async (text: string) => {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
       content: text,
     }
     setMessages((prev) => [...prev, userMessage])
+    setIsLoading(true)
 
-    setTimeout(() => {
-      const response =
-        ASSISTANT_RESPONSES[text] ||
-        `Thanks for asking about "${text}". I'm looking into that for you. In the meantime, feel free to explore the suggestion cards or ask another question!`
+    try {
+      // Convert messages to API format for conversation history
+      const conversationHistory: APIChatMessage[] = messages.map(msg => ({
+        role: msg.role as "user" | "assistant",
+        content: msg.content,
+      }))
+
+      // Call the API
+      const response = await sendChatMessage({
+        message: text,
+        conversation_history: conversationHistory,
+        user_id: user?.uid,
+      })
+
+      // Add assistant response
       const assistantMessage: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: response,
+        content: response.message,
       }
       setMessages((prev) => [...prev, assistantMessage])
-    }, 800)
+    } catch (error) {
+      console.error("Error sending message:", error)
+      
+      // Show error message to user
+      const errorMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "Sorry, I encountered an error processing your message. Please try again.",
+      }
+      setMessages((prev) => [...prev, errorMessage])
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleSuggestionSelect = (text: string) => {
@@ -76,6 +89,17 @@ export function ChatArea() {
             {messages.map((msg) => (
               <MessageBubble key={msg.id} message={msg} />
             ))}
+            {isLoading && (
+              <div className="flex items-start gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                  <div className="h-4 w-4 animate-pulse rounded-full bg-primary" />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <div className="h-4 w-32 animate-pulse rounded bg-muted" />
+                  <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -92,6 +116,7 @@ export function ChatArea() {
           value={inputValue}
           onChange={setInputValue}
           onSend={handleSend}
+          disabled={isLoading}
         />
       </div>
     </div>

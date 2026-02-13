@@ -145,3 +145,54 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom styles for markdown prose in chat messages */
+@layer components {
+  .prose {
+    @apply text-foreground;
+  }
+  
+  .prose p {
+    @apply my-2;
+  }
+  
+  .prose strong {
+    @apply font-semibold text-foreground;
+  }
+  
+  .prose em {
+    @apply italic;
+  }
+  
+  .prose h1,
+  .prose h2,
+  .prose h3,
+  .prose h4 {
+    @apply font-bold text-foreground;
+  }
+  
+  .prose ul,
+  .prose ol {
+    @apply my-2 space-y-1;
+  }
+  
+  .prose li {
+    @apply text-foreground;
+  }
+  
+  .prose code {
+    @apply bg-muted px-1.5 py-0.5 rounded text-xs font-mono;
+  }
+  
+  .prose pre {
+    @apply bg-muted p-3 rounded-lg overflow-x-auto my-2;
+  }
+  
+  .prose a {
+    @apply text-primary hover:underline;
+  }
+  
+  .prose blockquote {
+    @apply border-l-4 border-primary pl-4 italic;
+  }
+}

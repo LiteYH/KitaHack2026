@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # AI API Keys
     openai_api_key: Optional[str] = Field(default=None, description="OpenAI API Key for content generation")
     anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic Claude API Key")
-    google_api_key: Optional[str] = Field(default=None, description="Google API Key for external services")
+    google_api_key: Optional[str] = Field(default=None, alias="GOOGLE_API_KEY", description="Google Gemini API Key")
 
     # External integrations
     facebook_api_token: Optional[str] = Field(default=None, description="Facebook/Meta API Token for publishing")
@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        populate_by_name = True  # Allow both field name and alias
 
 
 @lru_cache()
