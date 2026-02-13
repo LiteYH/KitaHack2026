@@ -10,8 +10,8 @@ const spaceGrotesk = Space_Grotesk({
 })
 
 export const metadata: Metadata = {
-  title: 'UiGraph Chat - AI Assistant',
-  description: 'Ask me about your projects, team members, bugs, deployments, or anything else!',
+  title: 'BossolutionAI - AI Marketing Assistant',
+  description: 'AI-Powered Marketing and Advertisement Platform for SMEs. Automate content creation, competitor analysis, and campaign optimization.',
 }
 
 export default function RootLayout({

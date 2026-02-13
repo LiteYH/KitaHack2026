@@ -7,18 +7,18 @@ import { ChatInput } from "./chat-input"
 import { MessageBubble, type Message } from "./message-bubble"
 
 const ASSISTANT_RESPONSES: Record<string, string> = {
-  "Show me the backend flow for user authentication":
-    "The user authentication flow starts with the client sending credentials to the /api/auth/login endpoint. The server validates the credentials against the database, generates a JWT token pair (access + refresh), and returns them in an HTTP-only cookie. Middleware checks the token on each protected route request.",
-  "What business rules apply to payment processing?":
-    "Payment processing follows these business rules: 1) All transactions over $10,000 require additional verification. 2) Refunds must be processed within 30 days. 3) Currency conversion uses real-time exchange rates. 4) Failed payments trigger an automatic retry after 24 hours.",
-  "Are there any open bugs on the dashboard project?":
-    "There are currently 3 open bugs on the dashboard project: 1) Chart rendering lag on mobile devices (P2). 2) Date filter not resetting properly (P1). 3) Export CSV missing header row (P3). The P1 bug is assigned to the frontend team for this sprint.",
-  "Explain the API endpoints for the trading platform":
-    "The Trading API has the following key endpoints: GET /api/trades - list all trades, POST /api/trades - create a new trade, GET /api/portfolio - get portfolio summary, WebSocket /ws/prices - real-time price streaming. All endpoints require Bearer token authentication.",
-  "Who is responsible for the crypto dashboard?":
-    "The crypto dashboard is owned by Sarah Chen (Engineering Lead). The frontend is maintained by the UI team (3 engineers), and the data pipeline is managed by the Data Engineering team. For urgent issues, contact #crypto-dashboard on Slack.",
-  "Show me recent deployments and their status":
-    "Here are the recent deployments: 1) v2.4.1 - Production - Deployed 2h ago (Success). 2) v2.4.0 - Staging - Deployed yesterday (Success). 3) v2.3.9 - Production - Rolled back due to memory leak (Failed). All deployments are tracked in the CI/CD pipeline.",
+  "Generate marketing content for my social media campaign":
+    "I can help you generate engaging content! Let me create compelling text, eye-catching images, and video concepts for your campaign. What's your target audience and key message? I'll generate platform-optimized content for Facebook, Instagram, LinkedIn, and Twitter.",
+  "Analyze my competitors' marketing strategies":
+    "I'll scrape and analyze your competitors' content across multiple platforms. I've identified their top-performing posts, engagement patterns, and trending content. Their strategy focuses on short-form videos (68% engagement), user-generated content, and weekly contests. Would you like detailed insights?",
+  "Schedule and publish my content automatically":
+    "Your content is ready to be published! I can automatically post to Facebook, Instagram, LinkedIn, Twitter, and TikTok. Set your preferred posting schedule, and I'll optimize posting times based on your audience's activity patterns. Want to review the queue?",
+  "How can I optimize my current campaigns?":
+    "Based on your campaign data, I recommend: 1) Shift 30% budget to Instagram Reels (3x higher ROI). 2) A/B test your call-to-action buttons. 3) Reduce ad spend on Facebook by 15% and increase LinkedIn by 20%. 4) Update ad creatives - current ones are showing fatigue. Expected ROI improvement: +42%.",
+  "Show me my ROI dashboard and campaign performance":
+    "Your ROI Dashboard shows: Campaign A: $12,450 revenue, 340% ROI. Campaign B: $8,200 revenue, 280% ROI. Overall profit: $20,650 with 22% month-over-month growth. Top performing channel: Instagram (45% of conversions). Download detailed reports or view AI insights?",
+  "Monitor competitors and suggest response strategies":
+    "Continuous monitoring active! Competitor X just launched a flash sale campaign (30% off). Recommendation: Counter with a limited-time bundle offer + free shipping within 4 hours. Competitor Y's viral post gained 10K shares - I've analyzed their content style and prepared a similar template for you.",
 }
 
 export function ChatArea() {
@@ -66,9 +66,9 @@ export function ChatArea() {
             <div className="mb-4">
               <UiGraphLogo className="h-24 w-24" />
             </div>
-            <h2 className="text-xl font-bold text-foreground">UiGraph Chat</h2>
+            <h2 className="text-xl font-bold text-foreground">BossolutionAI</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Ask me about your project!
+              Your AI Marketing Assistant
             </p>
           </div>
         ) : (

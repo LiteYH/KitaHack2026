@@ -1,12 +1,12 @@
 "use client"
 
 import {
-  ShieldCheck,
-  CreditCard,
-  Bug,
-  Code2,
-  User,
   FileText,
+  Search,
+  Send,
+  Target,
+  BarChart3,
+  Eye,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -19,39 +19,39 @@ interface Suggestion {
 
 const suggestions: Suggestion[] = [
   {
-    icon: ShieldCheck,
-    title: "User Auth Flow",
-    description: "Show me the backend flow for user authentication",
-    iconColor: "text-emerald-500",
-  },
-  {
-    icon: CreditCard,
-    title: "Payment Rules",
-    description: "What business rules apply to payment processing?",
-    iconColor: "text-violet-500",
-  },
-  {
-    icon: Bug,
-    title: "Dashboard Bugs",
-    description: "Are there any open bugs on the dashboard project?",
-    iconColor: "text-amber-500",
-  },
-  {
-    icon: Code2,
-    title: "Trading API",
-    description: "Explain the API endpoints for the trading platform",
-    iconColor: "text-sky-500",
-  },
-  {
-    icon: User,
-    title: "Dashboard Owner",
-    description: "Who is responsible for the crypto dashboard?",
-    iconColor: "text-emerald-500",
-  },
-  {
     icon: FileText,
-    title: "Deployment Logs",
-    description: "Show me recent deployments and their status",
+    title: "Content Planning",
+    description: "Generate marketing content for my social media campaign",
+    iconColor: "text-blue-500",
+  },
+  {
+    icon: Search,
+    title: "Competitor Intelligence",
+    description: "Analyze my competitors' marketing strategies",
+    iconColor: "text-purple-500",
+  },
+  {
+    icon: Send,
+    title: "Publishing",
+    description: "Schedule and publish my content automatically",
+    iconColor: "text-green-500",
+  },
+  {
+    icon: Target,
+    title: "Campaign & Optimization",
+    description: "How can I optimize my current campaigns?",
+    iconColor: "text-orange-500",
+  },
+  {
+    icon: BarChart3,
+    title: "ROI Dashboard",
+    description: "Show me my ROI dashboard and campaign performance",
+    iconColor: "text-indigo-500",
+  },
+  {
+    icon: Eye,
+    title: "Continuous Monitoring",
+    description: "Monitor competitors and suggest response strategies",
     iconColor: "text-rose-500",
   },
 ]

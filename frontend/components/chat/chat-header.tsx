@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 export function ChatHeader() {
   return (
     <header className="flex items-center justify-between border-b border-border bg-card px-6 py-3">
-      <h1 className="text-lg font-semibold text-foreground">Ask AI</h1>
+      <h1 className="text-lg font-semibold text-foreground">BossolutionAI</h1>
       <div className="flex items-center gap-3">
         <button
           className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
@@ -40,16 +40,16 @@ export function GreetingBanner() {
         </div>
         <div>
           <p className="text-sm font-semibold text-foreground">
-            {"Hi, I'm UiGraph Assist. How can I help you?"}
+            {"Hi, I'm BossolutionAI. How can I help you?"}
           </p>
           <p className="text-xs text-muted-foreground">
-            Ask me about your projects, team members, bugs, deployments, or anything else!
+            Your AI-powered marketing assistant for content creation, competitor analysis, and campaign optimization!
           </p>
         </div>
       </div>
       <div className="flex items-center gap-2">
         <button className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
-          Engineer
+          Marketing Manager
           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
         </button>
         <button className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
