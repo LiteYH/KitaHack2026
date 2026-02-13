@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(default=None, description="OpenAI API Key for content generation")
     anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic Claude API Key")
     google_api_key: Optional[str] = Field(default=None, alias="GOOGLE_API_KEY", description="Google Gemini API Key")
+    tavily_api_key: Optional[str] = Field(default=None, alias="TAVILY_API_KEY", description="Tavily Search API Key")
 
     # External integrations
     facebook_api_token: Optional[str] = Field(default=None, description="Facebook/Meta API Token for publishing")

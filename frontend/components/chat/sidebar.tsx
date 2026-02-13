@@ -1,5 +1,7 @@
 "use client"
 
+import Link from "next/link"
+import { usePathname } from "next/navigation"
 import {
   Home,
   FolderOpen,
@@ -7,21 +9,25 @@ import {
   Bot,
   Bell,
   Settings,
+  Clock,
   Search,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const navItems = [
-  { icon: Home, label: "Home" },
-  { icon: FolderOpen, label: "Projects" },
-  { icon: ClipboardList, label: "Task" },
-  { icon: Bot, label: "Ask AI", active: true },
-  { icon: Bell, label: "Notification" },
-  { icon: Settings, label: "Settings" },
-  { icon: Search, label: "Search" },
+  { icon: Home, label: "Home", href: "/" },
+  { icon: FolderOpen, label: "Projects", href: "#" },
+  { icon: ClipboardList, label: "Task", href: "#" },
+  { icon: Bot, label: "Ask AI", href: "/chat" },
+  { icon: Clock, label: "Cron Jobs", href: "/cron-jobs" },
+  { icon: Bell, label: "Notification", href: "#" },
+  { icon: Settings, label: "Settings", href: "#" },
+  { icon: Search, label: "Search", href: "#" },
 ]
 
 export function Sidebar() {
+  const pathname = usePathname()
+
   return (
     <aside className="flex h-screen w-20 flex-col items-center border-r border-border bg-card py-5">
       {/* Logo */}
@@ -39,27 +45,29 @@ export function Sidebar() {
       <nav className="flex flex-1 flex-col items-center gap-1">
         {navItems.map((item) => {
           const Icon = item.icon
+          const isActive = item.href !== "#" && pathname.startsWith(item.href)
           return (
-            <button
+            <Link
               key={item.label}
+              href={item.href}
               className={cn(
                 "group flex w-16 flex-col items-center gap-1 rounded-lg px-2 py-2.5 text-[10px] font-medium transition-colors",
-                item.active
+                isActive
                   ? "text-primary"
                   : "text-muted-foreground hover:text-foreground"
               )}
               aria-label={item.label}
-              aria-current={item.active ? "page" : undefined}
+              aria-current={isActive ? "page" : undefined}
             >
               <Icon
                 className={cn(
                   "h-5 w-5",
-                  item.active ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                  isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
                 )}
-                strokeWidth={item.active ? 2.5 : 1.75}
+                strokeWidth={isActive ? 2.5 : 1.75}
               />
-              <span>{item.label}</span>
-            </button>
+              <span className="text-center leading-tight">{item.label}</span>
+            </Link>
           )
         })}
       </nav>

@@ -1,5 +1,7 @@
 # Backend Structure Overview
 
+⚠️ **UPDATED FOR MULTI-AGENT ARCHITECTURE** - See [SUBAGENTS_PATTERN.md](./SUBAGENTS_PATTERN.md) for complete pattern details
+
 ## 📂 Complete Folder Structure
 
 ```
@@ -14,30 +16,55 @@ backend/
 │   │       ├── __init__.py
 │   │       └── routers/              # HTTP Endpoints
 │   │           ├── __init__.py
-│   │           └── items.py          ✅ CREATED - CRUD endpoints
+│   │           ├── chat.py           ✅ Multi-agent chat endpoint
+│   │           ├── monitoring.py     ✅ Competitor monitoring endpoints
+│   │           └── items.py          ✅ Basic CRUD endpoints
+│   │
+│   ├── agents/                       # Agent Definitions
+│   │   ├── __init__.py
+│   │   ├── supervisor.py             ✅ Main supervisor agent (Subagents pattern)
+│   │   └── competitor_monitoring/    ✅ Competitor monitoring agent
+│   │       ├── agent.py
+│   │       ├── tools/
+│   │       └── skills/
 │   │
 │   ├── core/                         # Core Configuration
 │   │   ├── __init__.py
-│   │   └── config.py                 ✅ UPDATED - Added Firebase & AI keys
+│   │   ├── config.py                 ✅ Firebase, AI keys, environment config
+│   │   ├── firebase.py               ✅ Firestore client
+│   │   ├── auth.py                   ✅ Firebase authentication
+│   │   └── competitor_agent_memory.py ✅ Memory management (reusable)
 │   │
 │   ├── schemas/                      # Pydantic Models
 │   │   ├── __init__.py
-│   │   └── item.py                   ✅ EXISTS - Item models
+│   │   ├── chat.py                   ✅ Chat request/response models
+│   │   └── item.py                   ✅ Basic item models
 │   │
 │   └── services/                     # Business Logic
 │       ├── __init__.py
-│       └── items.py                  ✅ EXISTS - ItemsService
+│       ├── multi_agent_service.py    ✅ Main multi-agent coordinator
+│       ├── competitor_agent_service.py ✅ Competitor monitoring service
+│       ├── monitoring_service.py     ✅ Monitoring operations
+│       ├── monitoring_db_service.py  ✅ Monitoring database
+│       ├── cron_service.py           ✅ Scheduled tasks
+│       ├── notification_service.py   ✅ Notifications
+│       └── chat_service.py           ✅ Single-agent chat service
 │
-├── main.py                           ✅ UPDATED - Added CORS, description
-├── requirements.txt                  ✅ EXISTS
-├── pyproject.toml                    ✅ EXISTS
-├── .env                              ✅ EXISTS (add your keys)
-├── .gitignore                        ✅ EXISTS
-└── README.md                         ✅ UPDATED - Complete documentation
-
+├── data/                             # Data Storage
+│   └── monitoring.db                 ✅ SQLite for monitoring data
+│
+├── main.py                           ✅ FastAPI app entry point
+├── requirements.txt                  ✅ Python dependencies
+├── pyproject.toml                    ✅ Project configuration
+├── .env                              ✅ Environment variables
+├── .gitignore                        ✅ Git ignore rules
+├── README.md                         ✅ Project documentation
+├── AGENT_DEVELOPER_GUIDE.md          ✅ Guide for adding new agents
+├── SUBAGENTS_PATTERN.md              ✅ Multi-agent pattern documentation
+└── MIGRATION_SUMMARY.md              ✅ Migration history
 ```
 
-## 🔄 Request Flow
+## 🔄 Request Flow (Multi-Agent Chat)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -45,8 +72,8 @@ backend/
 │                  http://localhost:3000                      │
 └─────────────────────┬───────────────────────────────────────┘
                       │
-                      │ HTTP Request
-                      │ (e.g., GET /api/v1/items/)
+                      │ POST /api/v1/chat/message
+                      │ {"message": "monitor Nike", "thread_id": "chat-123"}
                       ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                   FastAPI Backend                           │
@@ -60,61 +87,91 @@ backend/
 │                      │                                      │
 │                      ↓                                      │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │         app/api/v1/routers/items.py                  │  │
-│  │  • HTTP Endpoints (GET, POST, PATCH, DELETE)        │  │
-│  │  • Request Validation (Pydantic)                     │  │
-│  │  • Response Formatting                               │  │
+│  │         app/api/v1/routers/chat.py                   │  │
+│  │  • POST /chat/message      - Single turn            │  │
+│  │  • POST /chat/stream       - Streaming              │  │
+│  │  • POST /chat/resume       - Resume after HITL       │  │
 │  └───────────────────┬──────────────────────────────────┘  │
 │                      │                                      │
 │                      ↓                                      │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │          app/services/items.py                       │  │
-│  │  • Business Logic                                    │  │
-│  │  • Data Management (currently in-memory)             │  │
-│  │  • Service Layer Abstraction                         │  │
+│  │    app/services/multi_agent_service.py               │  │
+│  │  • Wraps supervisor agent                           │  │
+│  │  • Delegates to supervisor for all operations       │  │
 │  └───────────────────┬──────────────────────────────────┘  │
 │                      │                                      │
 │                      ↓                                      │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │         app/schemas/item.py                          │  │
-│  │  • Pydantic Models (validation)                      │  │
-│  │  • ItemBase, ItemCreate, ItemUpdate, Item            │  │
+│  │         app/agents/supervisor.py                     │  │
+│  │  • Main supervisor agent (Subagents pattern)        │  │
+│  │  • Maintains conversation context                   │  │
+│  │  • Calls subagents as tools                         │  │
+│  │  • Handles general questions directly               │  │
+│  └───────────────────┬──────────────────────────────────┘  │
+│                      │                                      │
+│           ┌──────────┴──────────┐                          │
+│           ↓                     ↓                           │
+│  ┌─────────────────┐   ┌─────────────────┐                │
+│  │ competitor_     │   │ content_        │ (TODO)         │
+│  │ monitoring      │   │ planning        │                │
+│  │ (tool)          │   │ (tool)          │                │
+│  └────────┬────────┘   └─────────────────┘                │
+│           │                                                 │
+│           ↓                                                 │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  app/services/competitor_agent_service.py            │  │
+│  │  • Wraps competitor agent invocation                │  │
+│  │  • Can be called from supervisor OR directly        │  │
+│  │  • Used by cron jobs for scheduled monitoring       │  │
+│  └───────────────────┬──────────────────────────────────┘  │
+│                      │                                      │
+│                      ↓                                      │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  app/agents/competitor_monitoring/agent.py           │  │
+│  │  • Specialized competitor monitoring agent          │  │
+│  │  • Tools: research, monitoring setup                │  │
+│  │  • Skills: analysis, reporting                      │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                                                             │
-└─────────────────────────────────────────────────────────────┘
+└─────────────────────┬───────────────────────────────────────┘
                       │
-                      │ Future: Firebase/Firestore
                       ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                    Data Layer (Future)                      │
-│  • Firebase Firestore (NoSQL database)                     │
-│  • Firebase Authentication                                  │
+│                    Data Layer                               │
+│  • Firebase Firestore (user configs, monitoring data)      │
+│  • Firebase Authentication (user sessions)                  │
+│  • SQLite (monitoring.db - competitor data cache)          │
+│  • In-memory checkpointer (conversation state)             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ## ✅ What You Have Now
 
-### 1. **Proper Folder Structure** ✓
-- `/app/api/v1/routers/` - All HTTP endpoints
-- `/app/services/` - Business logic
-- `/app/schemas/` - Data models
-- `/app/core/` - Configuration
+### 1. **Multi-Agent Architecture** ✓
+- Supervisor agent coordinates all interactions (Subagents pattern)
+- Competitor monitoring agent fully functional
+- Easy to add new agents - just wrap as tools
+- Natural conversation flow with context preservation
 
-### 2. **Items API** ✓
-- Full CRUD operations
-- Proper HTTP status codes
-- Error handling (404, etc.)
-- OpenAPI documentation
+### 2. **Chat API** ✓
+- Full conversation support with thread management
+- Streaming responses
+- Human-in-the-loop (HITL) support for approvals
+- Resume interrupted workflows
 
-### 3. **CORS Configured** ✓
-- Frontend can call backend
-- Supports localhost:3000, 3001, 5173
+### 3. **Competitor Monitoring** ✓
+- Research competitors
+- Setup monitoring configurations
+- Track marketing strategies
+- Scheduled cron jobs for automated monitoring
+- Firestore persistence for configs
 
-### 4. **Configuration Management** ✓
-- Environment variables
-- Firebase settings
-- AI API keys
-- Social media tokens
+### 4. **Infrastructure** ✓
+- Firebase Firestore for data persistence
+- Firebase Authentication for user management
+- SQLite for monitoring data cache
+- In-memory checkpointers for conversation state
+- CORS configured for frontend integration
 
 ## 🚀 How to Use Right Now
 
@@ -122,7 +179,7 @@ backend/
 
 ```bash
 cd backend
-python main.py
+uvicorn main:app --reload
 ```
 
 Server runs on: **http://localhost:8000**
@@ -131,68 +188,100 @@ Server runs on: **http://localhost:8000**
 
 Open in browser: **http://localhost:8000/docs**
 
-### 3. Test from Frontend
+### 3. Test Multi-Agent Chat
 
 ```typescript
 // In your Next.js app
-const response = await fetch('http://localhost:8000/api/v1/items/');
-const items = await response.json();
-console.log(items); // []
-```
-
-### 4. Create an Item
-
-```typescript
-const newItem = await fetch('http://localhost:8000/api/v1/items/', {
+const response = await fetch('http://localhost:8000/api/v1/chat/message', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
-    name: 'Summer Campaign',
-    description: 'Social media campaign for summer sale'
+    message: 'monitor Nike',
+    thread_id: 'chat-123'
   })
 });
-const item = await newItem.json();
-console.log(item); // { id: 1, name: "Summer Campaign", ... }
+const result = await response.json();
+console.log(result.response); // Agent response
+```
+
+### 4. Test Streaming Chat
+
+```typescript
+const response = await fetch('http://localhost:8000/api/v1/chat/stream', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    message: 'analyze Nike marketing strategy',
+    thread_id: 'chat-123'
+  })
+});
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  
+  const chunk = decoder.decode(value);
+  const events = chunk.split('\n\n');
+  
+  for (const event of events) {
+    if (event.startsWith('data: ')) {
+      const data = JSON.parse(event.slice(6));
+      if (data.type === 'token') {
+        console.log(data.content); // Stream tokens
+      }
+    }
+  }
+}
 ```
 
 ## 📝 Next Steps
 
-### Option A: Add More Features (Recommended First)
+### Option A: Add More Agents (Recommended)
 
-1. Create `campaigns.py` router for campaign management
-2. Create `content.py` router for AI content generation
-3. Create `analytics.py` router for ROI dashboard
+Follow [AGENT_DEVELOPER_GUIDE.md](./AGENT_DEVELOPER_GUIDE.md) to add new agents:
+1. Create agent service in `app/services/`
+2. Create agent definition in `app/agents/`
+3. Wrap as tool in `app/agents/supervisor.py`
+4. Test via chat API
 
-### Option B: Connect to Firebase
+### Option B: Enhance Existing Agents
 
-1. Install `firebase-admin`
-2. Update `ItemsService` to use Firestore
-3. Add authentication middleware
+1. Add more tools to competitor monitoring agent
+2. Improve memory management
+3. Add more sophisticated analysis
 
-### Option C: Add AI Integration
+### Option C: Frontend Integration
 
-1. Install `openai` or `anthropic` packages
-2. Create AI service for content generation
-3. Connect to your backend
+1. Connect Next.js frontend to chat API
+2. Implement real-time streaming UI
+3. Add HITL approval interface
+4. Build monitoring dashboard
 
 ## 🎯 Current Status
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Folder Structure | ✅ Complete | Following best practices |
-| Items API | ✅ Working | In-memory storage |
-| CORS | ✅ Configured | Frontend can connect |
-| Documentation | ✅ Complete | Auto-generated by FastAPI |
-| Firebase | ⏳ Pending | Need to add Firebase Admin SDK |
-| AI Integration | ⏳ Pending | Need API keys + implementation |
-| Authentication | ⏳ Pending | Need Firebase Auth middleware |
+| Multi-Agent System | ✅ Complete | Subagents pattern implemented |
+| Supervisor Agent | ✅ Working | Routes to specialized agents |
+| Competitor Monitoring | ✅ Working | Research & monitoring setup |
+| Chat API | ✅ Complete | Single turn + streaming |
+| HITL Support | ✅ Complete | Approval workflows |
+| Firestore | ✅ Complete | User configs + monitoring data |
+| Firebase Auth | ✅ Complete | User authentication |
+| Cron Jobs | ✅ Complete | Scheduled monitoring |
+| Content Planning Agent | ⏳ TODO | Your teammates can add |
+| Publishing Agent | ⏳ TODO | Your teammates can add |
 
 ## 💡 Pro Tips
 
-1. **Always check Swagger docs**: http://localhost:8000/docs
-2. **Test with curl or Postman** before integrating frontend
-3. **Keep services thin** - move complex logic to separate utility functions
-4. **Use environment variables** for all secrets (.env file)
-5. **Version your API** (/api/v1, /api/v2) for future changes
+1. **Check Swagger docs**: http://localhost:8000/docs for all available endpoints
+2. **Test with thread IDs** to maintain conversation context across multiple messages
+3. **Use streaming** for better UX with long-running agent operations
+4. **Follow AGENT_DEVELOPER_GUIDE.md** when adding new agents - it prevents conflicts
+5. **Supervisor handles routing** automatically - no need to specify which agent
+6. **Services can be called directly** from cron jobs or other services (bypassing supervisor)
 
-Your backend is now properly structured and ready for development! 🎉
+Your multi-agent system is fully operational and ready for expansion! 🎉

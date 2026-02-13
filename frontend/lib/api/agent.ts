@@ -3,6 +3,8 @@
  * Handles communication with the unified multi-agent backend
  */
 
+import { getAuthHeaders } from '../auth-headers';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 const API_V1_URL = `${API_BASE_URL}/api/v1`;
 
@@ -20,12 +22,7 @@ export interface AgentChatResponse {
   agent?: string;
 }
 
-export type StreamEventType = 'routing' | 'metadata' | 'token' | 'interrupt' | 'done' | 'error';
-
-export interface MetadataEvent {
-  type: 'metadata';
-  thread_id: string;
-}
+export type StreamEventType = 'routing' | 'token' | 'interrupt' | 'done' | 'error';
 
 export interface RoutingEvent {
   type: 'routing';
@@ -54,6 +51,7 @@ export interface InterruptData {
 
 export interface ActionRequest {
   id?: string;
+  name?: string;
   action: string;
   args: Record<string, any>;
   description?: string;
@@ -68,11 +66,12 @@ export interface DoneEvent {
   type: 'done';
 }
 
-export type StreamEvent = RoutingEvent | MetadataEvent | TokenEvent | InterruptEvent | ErrorEvent | DoneEvent;
+export type StreamEvent = RoutingEvent | TokenEvent | InterruptEvent | ErrorEvent | DoneEvent;
 
 export interface HITLDecision {
   type: 'approve' | 'edit' | 'reject';
   interrupt_id?: string;
+  action?: string;
   args?: Record<string, any>;
   feedback?: string;
 }
@@ -88,6 +87,23 @@ export interface AgentResumeResponse {
   message: string;
   thread_id: string;
   completed: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  user_id: string;
+  message: string;
+  type: string;
+  sender: string;
+  timestamp: string;
+  metadata?: {
+    competitor?: string;
+    aspects?: string[];
+    is_significant?: boolean;
+    significance_score?: number;
+    result_id?: string;
+    config_id?: string;
+  };
 }
 
 // ── API Functions ────────────────────────────────────────────────────
@@ -131,7 +147,6 @@ export function streamAgentMessage(
 
   (async () => {
     try {
-      console.log('[API] Starting stream request:', request);
       const response = await fetch(`${API_V1_URL}/chat/stream`, {
         method: 'POST',
         headers: {
@@ -161,32 +176,27 @@ export function streamAgentMessage(
         }
 
         const chunk = decoder.decode(value, { stream: true });
-        console.log('[API/STREAM] Received chunk:', chunk.substring(0, 200));
         const lines = chunk.split('\n');
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
-            const rawData = line.slice(6);
-            console.log('[API/STREAM] Parsing SSE line:', rawData.substring(0, 200));
             try {
-              const data = JSON.parse(rawData) as StreamEvent;
-              console.log('[API/STREAM] Parsed event:', data.type, data);
+              const data = JSON.parse(line.slice(6)) as StreamEvent;
               onEvent(data);
 
               if (data.type === 'done') {
-                console.log('[API/STREAM] Stream done signal received');
                 onComplete?.();
                 return;
               }
             } catch (e) {
-              console.error('[API/STREAM] Error parsing SSE data:', e, 'Raw:', rawData);
+              console.error('Error parsing SSE data:', e);
             }
           }
         }
       }
     } catch (error) {
       if (!aborted) {
-        console.error('[API/STREAM] Stream error:', error);
+        console.error('Stream error:', error);
         onError?.(error instanceof Error ? error : new Error('Unknown error'));
       }
     }
@@ -238,7 +248,6 @@ export function streamResumeAgent(
 
   (async () => {
     try {
-      console.log('[API/RESUME] Starting resume stream request:', request);
       const response = await fetch(`${API_V1_URL}/chat/resume/stream`, {
         method: 'POST',
         headers: {
@@ -249,11 +258,9 @@ export function streamResumeAgent(
       });
 
       if (!response.ok) {
-        console.error('[API/RESUME] HTTP error:', response.status, response.statusText);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      console.log('[API/RESUME] Stream connected successfully');
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
 
@@ -270,32 +277,27 @@ export function streamResumeAgent(
         }
 
         const chunk = decoder.decode(value, { stream: true });
-        console.log('[API/RESUME] Received chunk:', chunk.substring(0, 200));
         const lines = chunk.split('\n');
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
-            const rawData = line.slice(6);
-            console.log('[API/RESUME] Parsing SSE line:', rawData.substring(0, 200));
             try {
-              const data = JSON.parse(rawData) as StreamEvent;
-              console.log('[API/RESUME] Parsed event:', data.type, data);
+              const data = JSON.parse(line.slice(6)) as StreamEvent;
               onEvent(data);
 
               if (data.type === 'done') {
-                console.log('[API/RESUME] Stream done signal received');
                 onComplete?.();
                 return;
               }
             } catch (e) {
-              console.error('[API/RESUME] Error parsing SSE data:', e, 'Raw:', rawData);
+              console.error('Error parsing SSE data:', e);
             }
           }
         }
       }
     } catch (error) {
       if (!aborted) {
-        console.error('[API/RESUME] Stream error:', error);
+        console.error('Resume stream error:', error);
         onError?.(error instanceof Error ? error : new Error('Unknown error'));
       }
     }
@@ -306,4 +308,36 @@ export function streamResumeAgent(
     aborted = true;
     abortController.abort();
   };
+}
+
+/**
+ * Get chat messages (monitoring updates, etc.)
+ */
+export async function getChatMessages(
+  limit: number = 50,
+  messageType?: string
+): Promise<ChatMessage[]> {
+  try {
+    const headers = await getAuthHeaders();
+    const params = new URLSearchParams();
+    params.append('limit', limit.toString());
+    if (messageType) {
+      params.append('message_type', messageType);
+    }
+
+    const response = await fetch(`${API_V1_URL}/chat/messages?${params}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to get chat messages: ${error}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    console.error('Get chat messages error:', error);
+    throw error;
+  }
 }
