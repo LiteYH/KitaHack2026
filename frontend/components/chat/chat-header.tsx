@@ -1,7 +1,7 @@
 "use client"
 
-import { Bell, LayoutGrid, ChevronDown, History } from "lucide-react"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Bell, LayoutGrid, ChevronDown, Clock } from "lucide-react"
+import { UserProfileDropdown } from "./user-profile-dropdown"
 
 export function ChatHeader() {
   return (
@@ -20,10 +20,7 @@ export function ChatHeader() {
         >
           <Bell className="h-5 w-5" />
         </button>
-        <Avatar className="h-8 w-8">
-          <AvatarImage src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=64&h=64&fit=crop&crop=face" alt="User avatar" />
-          <AvatarFallback className="bg-primary text-primary-foreground text-xs">JD</AvatarFallback>
-        </Avatar>
+        <UserProfileDropdown />
       </div>
     </header>
   )
@@ -53,7 +50,7 @@ export function GreetingBanner() {
           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
         </button>
         <button className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
-          <History className="h-3.5 w-3.5" />
+          <Clock className="h-3.5 w-3.5" />
           History
         </button>
       </div>
