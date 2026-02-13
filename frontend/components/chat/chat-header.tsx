@@ -1,0 +1,62 @@
+"use client"
+
+import { Bell, LayoutGrid, ChevronDown, History } from "lucide-react"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+
+export function ChatHeader() {
+  return (
+    <header className="flex items-center justify-between border-b border-border bg-card px-6 py-3">
+      <h1 className="text-lg font-semibold text-foreground">Ask AI</h1>
+      <div className="flex items-center gap-3">
+        <button
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          aria-label="Apps"
+        >
+          <LayoutGrid className="h-5 w-5" />
+        </button>
+        <button
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          aria-label="Notifications"
+        >
+          <Bell className="h-5 w-5" />
+        </button>
+        <Avatar className="h-8 w-8">
+          <AvatarImage src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=64&h=64&fit=crop&crop=face" alt="User avatar" />
+          <AvatarFallback className="bg-primary text-primary-foreground text-xs">JD</AvatarFallback>
+        </Avatar>
+      </div>
+    </header>
+  )
+}
+
+export function GreetingBanner() {
+  return (
+    <div className="flex items-center justify-between border-b border-border bg-card px-6 py-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+          <svg viewBox="0 0 24 24" className="h-5 w-5 text-primary" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+          </svg>
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-foreground">
+            {"Hi, I'm UiGraph Assist. How can I help you?"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Ask me about your projects, team members, bugs, deployments, or anything else!
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <button className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+          Engineer
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+        </button>
+        <button className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+          <History className="h-3.5 w-3.5" />
+          History
+        </button>
+      </div>
+    </div>
+  )
+}

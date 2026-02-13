@@ -1,0 +1,88 @@
+"use client"
+
+import {
+  ShieldCheck,
+  CreditCard,
+  Bug,
+  Code2,
+  User,
+  FileText,
+} from "lucide-react"
+import type { LucideIcon } from "lucide-react"
+
+interface Suggestion {
+  icon: LucideIcon
+  iconColor: string
+  title: string
+  description: string
+}
+
+const suggestions: Suggestion[] = [
+  {
+    icon: ShieldCheck,
+    title: "User Auth Flow",
+    description: "Show me the backend flow for user authentication",
+    iconColor: "text-emerald-500",
+  },
+  {
+    icon: CreditCard,
+    title: "Payment Rules",
+    description: "What business rules apply to payment processing?",
+    iconColor: "text-violet-500",
+  },
+  {
+    icon: Bug,
+    title: "Dashboard Bugs",
+    description: "Are there any open bugs on the dashboard project?",
+    iconColor: "text-amber-500",
+  },
+  {
+    icon: Code2,
+    title: "Trading API",
+    description: "Explain the API endpoints for the trading platform",
+    iconColor: "text-sky-500",
+  },
+  {
+    icon: User,
+    title: "Dashboard Owner",
+    description: "Who is responsible for the crypto dashboard?",
+    iconColor: "text-emerald-500",
+  },
+  {
+    icon: FileText,
+    title: "Deployment Logs",
+    description: "Show me recent deployments and their status",
+    iconColor: "text-rose-500",
+  },
+]
+
+interface SuggestionCardsProps {
+  onSelect: (text: string) => void
+}
+
+export function SuggestionCards({ onSelect }: SuggestionCardsProps) {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {suggestions.map((item) => {
+        const Icon = item.icon
+        return (
+          <button
+            key={item.title}
+            onClick={() => onSelect(item.description)}
+            className="group flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/30 hover:shadow-sm"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-secondary">
+              <Icon className={`h-4 w-4 ${item.iconColor}`} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">{item.title}</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground line-clamp-2">
+                {item.description}
+              </p>
+            </div>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
