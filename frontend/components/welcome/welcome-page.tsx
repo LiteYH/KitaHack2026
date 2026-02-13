@@ -68,7 +68,7 @@ export function WelcomePage() {
 
           {/* Buttons */}
           <div className="flex flex-col items-center space-y-4 pt-8 sm:flex-row sm:space-x-4 sm:space-y-0 animate-fade-in" style={{ animationDelay: '0.6s' }}>
-            <Link href="/chat">
+            <Link href="/auth/signin">
               <Button 
                 size="lg" 
                 className="rounded-full bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-6 text-base font-semibold text-white shadow-lg transition-all hover:scale-105 hover:shadow-2xl hover:from-blue-700 hover:to-purple-700"
