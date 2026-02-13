@@ -12,6 +12,7 @@ import {
   sendPasswordResetEmail,
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { ensureUserDoc } from "@/lib/firestore/users";
 
 interface AuthContextType {
   user: User | null;
@@ -40,9 +41,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       setLoading(false);
+      
+      // Automatically create/update user document in Firestore after login
+      if (user) {
+        try {
+          await ensureUserDoc();
+        } catch (error) {
+          console.error("Error ensuring user document:", error);
+        }
+      }
     });
 
     return unsubscribe;
@@ -50,15 +60,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const signIn = async (email: string, password: string) => {
     await signInWithEmailAndPassword(auth, email, password);
+    // ensureUserDoc will be called automatically by onAuthStateChanged
   };
 
   const signUp = async (email: string, password: string) => {
     await createUserWithEmailAndPassword(auth, email, password);
+    // ensureUserDoc will be called automatically by onAuthStateChanged
   };
 
   const signInWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
     await signInWithPopup(auth, provider);
+    // ensureUserDoc will be called automatically by onAuthStateChanged
   };
 
   const logout = async () => {
