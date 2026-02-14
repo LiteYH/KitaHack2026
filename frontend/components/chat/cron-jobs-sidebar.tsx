@@ -46,8 +46,10 @@ import {
   updateCronJob,
   bulkDeleteCronJobs,
   getCronStats,
+  getCronJobResults,
   type CronJob,
   type CronStats,
+  type MonitoringResult,
 } from "@/lib/api/crons";
 
 /**
@@ -77,6 +79,10 @@ export function CronJobsSidebar({ variant = "sidebar", className }: CronJobsSide
   const [editFrequencyUnit, setEditFrequencyUnit] = useState<'hours' | 'minutes'>('hours');
   const [editAspects, setEditAspects] = useState<string[]>([]);
   const [editNotificationPreference, setEditNotificationPreference] = useState("significant_only");
+  const [resultsDialogOpen, setResultsDialogOpen] = useState(false);
+  const [jobToViewResults, setJobToViewResults] = useState<CronJob | null>(null);
+  const [results, setResults] = useState<MonitoringResult[]>([]);
+  const [loadingResults, setLoadingResults] = useState(false);
 
   // Fetch cron jobs
   const {
@@ -273,6 +279,25 @@ export function CronJobsSidebar({ variant = "sidebar", className }: CronJobsSide
     bulkDeleteMutation.mutate(Array.from(selectedJobIds));
   };
 
+  const handleViewResults = async (job: CronJob) => {
+    setJobToViewResults(job);
+    setResultsDialogOpen(true);
+    setLoadingResults(true);
+    try {
+      const jobResults = await getCronJobResults(job.id, 50);
+      setResults(jobResults);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to load results",
+        variant: "destructive",
+      });
+      setResults([]);
+    } finally {
+      setLoadingResults(false);
+    }
+  };
+
   const formatRelativeTime = (dateString?: string) => {
     if (!dateString) return "Unknown";
     
@@ -450,7 +475,7 @@ export function CronJobsSidebar({ variant = "sidebar", className }: CronJobsSide
                           </>
                         )}
                       </DropdownMenuItem>
-                      <DropdownMenuItem disabled>
+                      <DropdownMenuItem onClick={() => handleViewResults(job)}>
                         <BarChart3 className="w-4 h-4 mr-2" />
                         View Results
                       </DropdownMenuItem>
@@ -635,6 +660,96 @@ export function CronJobsSidebar({ variant = "sidebar", className }: CronJobsSide
               disabled={bulkDeleteMutation.isPending || selectedJobIds.size === 0}
             >
               {bulkDeleteMutation.isPending ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Results Dialog */}
+      <Dialog open={resultsDialogOpen} onOpenChange={setResultsDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Monitoring Results</DialogTitle>
+            <DialogDescription>
+              Execution history for {jobToViewResults?.competitor}
+            </DialogDescription>
+          </DialogHeader>
+
+          <ScrollArea className="flex-1 pr-4">
+            {loadingResults ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <RefreshCw className="w-8 h-8 mx-auto mb-2 animate-spin" />
+                Loading results...
+              </div>
+            ) : results.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <BarChart3 className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p className="text-sm">No results yet</p>
+                <p className="text-xs mt-1">
+                  Results will appear after the first execution
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {results.map((result) => (
+                  <Card key={result.id} className="p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-semibold">
+                            {result.competitor}
+                          </span>
+                          {result.is_significant && (
+                            <Badge variant="default" className="text-xs">
+                              Significant
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(result.execution_time).toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-muted-foreground">Score</div>
+                        <div className="text-lg font-bold text-primary">
+                          {result.significance_score}
+                        </div>
+                      </div>
+                    </div>
+
+                    {result.aspects && result.aspects.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-3">
+                        {result.aspects.map((aspect) => (
+                          <Badge
+                            key={aspect}
+                            variant="outline"
+                            className="text-xs"
+                          >
+                            {aspect}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="text-sm text-foreground bg-muted/50 rounded p-3">
+                      {result.summary}
+                    </div>
+
+                    {result.notification_sent && (
+                      <div className="mt-2 text-xs text-blue-500 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        Notification sent
+                      </div>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+
+          <DialogFooter>
+            <Button onClick={() => setResultsDialogOpen(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

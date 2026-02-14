@@ -12,6 +12,8 @@ from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.triggers.interval import IntervalTrigger
 from google.cloud import firestore
 
+from app.services.chat_history_service import ChatHistoryService
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +35,7 @@ class CronService:
         self.firestore = firestore_client
         self.monitoring_service = monitoring_service
         self.notification_service = notification_service
+        self.chat_history = ChatHistoryService(firestore_client)
         
         # Configure APScheduler with in-memory jobstore
         # Note: Jobs will not persist across server restarts
@@ -67,7 +70,8 @@ class CronService:
         aspects: List[str],
         frequency_hours: float,
         user_id: str,
-        notification_preference: str = "significant"
+        notification_preference: str = "significant",
+        existing_job_id: Optional[str] = None
     ) -> str:
         """
         Create and schedule a monitoring job.
@@ -79,12 +83,24 @@ class CronService:
             frequency_hours: How often to run (in hours)
             user_id: User ID who created the job
             notification_preference: When to send notifications (always/significant/never)
+            existing_job_id: Optional existing job ID to reuse (for startup restoration)
             
         Returns:
             job_id: Generated job ID
         """
-        # Generate unique job ID
-        job_id = f"monitor_{uuid.uuid4().hex[:8]}"
+        # Check if a job already exists for this config
+        config_doc = self.firestore.collection('monitoring_configs').document(config_id).get()
+        if config_doc.exists:
+            config_data = config_doc.to_dict()
+            existing_apscheduler_job_id = config_data.get('apscheduler_job_id')
+            
+            # If job already exists and we're not restoring, don't create a duplicate
+            if existing_apscheduler_job_id and not existing_job_id:
+                logger.warning(f"Job already exists for config {config_id}: {existing_apscheduler_job_id}")
+                return existing_apscheduler_job_id
+        
+        # Use existing job ID if provided, otherwise generate new one
+        job_id = existing_job_id or f"monitor_{uuid.uuid4().hex[:8]}"
         
         # Calculate next run time (10 seconds from now for first run)
         next_run = datetime.utcnow() + timedelta(seconds=10)
@@ -224,11 +240,19 @@ class CronService:
             # Reset error count on successful execution
             job = self.scheduler.get_job(self._get_job_id_from_config(config_id))
             if job:
-                self.firestore.collection('cron_jobs').document(job.id).update({
-                    'error_count': 0,
-                    'last_execution': firestore.SERVER_TIMESTAMP,
-                    'last_error': None
-                })
+                try:
+                    # Check if document exists before updating
+                    job_doc = self.firestore.collection('cron_jobs').document(job.id).get()
+                    if job_doc.exists:
+                        self.firestore.collection('cron_jobs').document(job.id).update({
+                            'error_count': 0,
+                            'last_execution': firestore.SERVER_TIMESTAMP,
+                            'last_error': None
+                        })
+                    else:
+                        logger.warning(f"Cron job document {job.id} not found in Firestore, skipping update")
+                except Exception as update_error:
+                    logger.warning(f"Failed to update job status in Firestore: {update_error}")
             
             logger.info(f"Monitoring task completed successfully for {competitor}")
             
@@ -279,6 +303,7 @@ class CronService:
     ):
         """
         Save monitoring results as a chat message for proactive notification.
+        Uses a dedicated monitoring thread per user: `monitoring_{user_id}`
         
         Args:
             user_id: User ID
@@ -324,15 +349,23 @@ class CronService:
 _Result ID: {result_id}_
 """
             
-            # Save to a chat messages collection
-            message_id = uuid.uuid4().hex
-            self.firestore.collection('chat_messages').document(message_id).set({
-                'user_id': user_id,
-                'message': message_content,
-                'type': 'monitoring_update',
-                'sender': 'system',
-                'timestamp': firestore.SERVER_TIMESTAMP,
-                'metadata': {
+            # Get user's active thread (where they're currently chatting)
+            active_thread_id = await self.chat_history.get_active_thread(user_id)
+            
+            # Fallback to default thread if no active thread
+            if not active_thread_id:
+                active_thread_id = f"default_{user_id}"
+                logger.info(f"No active thread found for user {user_id}, using default thread")
+            
+            # Save monitoring update to the user's active chat thread
+            await self.chat_history.save_message(
+                thread_id=active_thread_id,
+                user_id=user_id,
+                role='system',
+                content=message_content,
+                agent='monitoring_cron',
+                metadata={
+                    'type': 'monitoring_update',
                     'competitor': competitor,
                     'aspects': aspects,
                     'is_significant': results.get('is_significant', False),
@@ -340,16 +373,16 @@ _Result ID: {result_id}_
                     'result_id': result_id,
                     'config_id': results.get('config_id', '')
                 }
-            })
+            )
             
-            logger.info(f"Saved monitoring result as chat message: {message_id} for user {user_id}")
+            logger.info(f"Saved monitoring result to active thread {active_thread_id} for user {user_id}")
             
         except Exception as e:
             logger.error(f"Failed to save monitoring as chat message: {e}", exc_info=True)
     
     async def pause_job(self, job_id: str) -> Dict[str, str]:
         """
-        Pause a monitoring job.
+        Pause a monitoring job and clean up any orphaned jobs for the same config.
         
         Args:
             job_id: Job ID to pause
@@ -358,12 +391,34 @@ _Result ID: {result_id}_
             Status dict
         """
         try:
-            self.scheduler.pause_job(job_id)
+            # Get the config_id for this job
+            job_doc = self.firestore.collection('cron_jobs').document(job_id).get()
+            config_id = None
+            if job_doc.exists:
+                config_id = job_doc.to_dict().get('config_id')
             
-            self.firestore.collection('cron_jobs').document(job_id).update({
-                'status': 'paused',
-                'updated_at': firestore.SERVER_TIMESTAMP
-            })
+            # Pause the job in APScheduler
+            try:
+                self.scheduler.pause_job(job_id)
+            except Exception as e:
+                logger.warning(f"Job {job_id} not found in scheduler: {e}")
+            
+            # Update job status in Firestore (check if document exists first)
+            try:
+                job_doc = self.firestore.collection('cron_jobs').document(job_id).get()
+                if job_doc.exists:
+                    self.firestore.collection('cron_jobs').document(job_id).update({
+                        'status': 'paused',
+                        'updated_at': firestore.SERVER_TIMESTAMP
+                    })
+                else:
+                    logger.warning(f"Cron job document {job_id} not found in Firestore, skipping update")
+            except Exception as update_error:
+                logger.warning(f"Failed to update job status in Firestore: {update_error}")
+            
+            # Clean up any orphaned jobs for this config
+            if config_id:
+                await self._cleanup_orphaned_jobs_for_config(config_id, job_id)
             
             logger.info(f"Job {job_id} paused")
             return {"status": "paused", "job_id": job_id}
@@ -383,13 +438,48 @@ _Result ID: {result_id}_
             Status dict
         """
         try:
-            self.scheduler.resume_job(job_id)
+            # Try to resume in APScheduler
+            try:
+                self.scheduler.resume_job(job_id)
+            except Exception as e:
+                # Job might not exist in scheduler, need to reload it
+                logger.warning(f"Job {job_id} not found in scheduler, attempting to reload: {e}")
+                
+                # Get config and reload job
+                job_doc = self.firestore.collection('cron_jobs').document(job_id).get()
+                if job_doc.exists:
+                    job_data = job_doc.to_dict()
+                    config_id = job_data.get('config_id')
+                    
+                    config_doc = self.firestore.collection('monitoring_configs').document(config_id).get()
+                    if config_doc.exists:
+                        config_data = config_doc.to_dict()
+                        
+                        # Recreate the job
+                        await self.create_monitoring_job(
+                            config_id=config_id,
+                            competitor=config_data.get('competitor'),
+                            aspects=config_data.get('aspects', []),
+                            frequency_hours=config_data.get('frequency_hours'),
+                            user_id=config_data.get('user_id'),
+                            notification_preference=config_data.get('notification_preference', 'significant'),
+                            existing_job_id=job_id
+                        )
+                        logger.info(f"Job {job_id} recreated and resumed")
             
-            self.firestore.collection('cron_jobs').document(job_id).update({
-                'status': 'running',
-                'updated_at': firestore.SERVER_TIMESTAMP,
-                'error_count': 0  # Reset error count on resume
-            })
+            # Update status in Firestore (check if document exists first)
+            try:
+                job_doc_check = self.firestore.collection('cron_jobs').document(job_id).get()
+                if job_doc_check.exists:
+                    self.firestore.collection('cron_jobs').document(job_id).update({
+                        'status': 'running',
+                        'updated_at': firestore.SERVER_TIMESTAMP,
+                        'error_count': 0  # Reset error count on resume
+                    })
+                else:
+                    logger.warning(f"Cron job document {job_id} not found in Firestore, skipping update")
+            except Exception as update_error:
+                logger.warning(f"Failed to update job status in Firestore: {update_error}")
             
             logger.info(f"Job {job_id} resumed")
             return {"status": "running", "job_id": job_id}
@@ -400,7 +490,7 @@ _Result ID: {result_id}_
     
     async def delete_job(self, job_id: str) -> Dict[str, str]:
         """
-        Delete a monitoring job.
+        Delete a monitoring job and clean up any orphaned jobs for the same config.
         
         Args:
             job_id: Job ID to delete
@@ -409,25 +499,33 @@ _Result ID: {result_id}_
             Status dict
         """
         try:
-            # Remove from APScheduler
-            self.scheduler.remove_job(job_id)
-            
             # Get config ID before deleting job record
             job_doc = self.firestore.collection('cron_jobs').document(job_id).get()
+            config_id = None
             
             if job_doc.exists:
                 job_data = job_doc.to_dict()
                 config_id = job_data.get('config_id')
-                
-                # Delete job record
+            
+            # Remove from APScheduler
+            try:
+                self.scheduler.remove_job(job_id)
+            except Exception as e:
+                logger.warning(f"Job {job_id} not found in scheduler: {e}")
+            
+            # Delete job record from Firestore
+            if job_doc.exists:
                 self.firestore.collection('cron_jobs').document(job_id).delete()
+            
+            # Clean up any orphaned jobs for this config
+            if config_id:
+                await self._cleanup_orphaned_jobs_for_config(config_id, None)
                 
                 # Update monitoring config status
-                if config_id:
-                    self.firestore.collection('monitoring_configs').document(config_id).update({
-                        'status': 'deleted',
-                        'updated_at': firestore.SERVER_TIMESTAMP
-                    })
+                self.firestore.collection('monitoring_configs').document(config_id).update({
+                    'status': 'deleted',
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
             
             logger.info(f"Job {job_id} deleted")
             return {"status": "deleted", "job_id": job_id}
@@ -509,9 +607,17 @@ _Result ID: {result_id}_
 
             if config_updates:
                 self.firestore.collection('monitoring_configs').document(config_id).update(config_updates)
-                self.firestore.collection('cron_jobs').document(job_id).update({
-                    'updated_at': firestore.SERVER_TIMESTAMP
-                })
+                # Update job timestamp (check if document exists first)
+                try:
+                    job_doc_check = self.firestore.collection('cron_jobs').document(job_id).get()
+                    if job_doc_check.exists:
+                        self.firestore.collection('cron_jobs').document(job_id).update({
+                            'updated_at': firestore.SERVER_TIMESTAMP
+                        })
+                    else:
+                        logger.warning(f"Cron job document {job_id} not found in Firestore, skipping update")
+                except Exception as update_error:
+                    logger.warning(f"Failed to update job timestamp in Firestore: {update_error}")
 
             logger.info(f"Job {job_id} updated")
             return {"status": "updated", "job_id": job_id}
@@ -612,43 +718,134 @@ _Result ID: {result_id}_
     async def load_jobs_on_startup(self):
         """
         Load active jobs from Firestore on server startup.
-        Recreate APScheduler jobs that were running.
+        This loads from monitoring_configs instead of cron_jobs to prevent duplicates.
         """
         try:
-            logger.info("Loading active jobs from Firestore...")
+            logger.info("Loading active monitoring jobs from Firestore...")
             
-            # Get all running jobs (Firestore client is sync, not async)
-            jobs = self.firestore.collection('cron_jobs').where(
-                'status', '==', 'running'
+            # Get all active/paused monitoring configs (NOT cron_jobs to avoid duplicates)
+            configs = self.firestore.collection('monitoring_configs').where(
+                'status', 'in', ['active', 'paused']
             ).get()
             
             loaded_count = 0
-            for job_doc in jobs:
-                job_data = job_doc.to_dict()
-                config_id = job_data.get('config_id')
+            for config_doc in configs:
+                config_data = config_doc.to_dict()
+                config_id = config_doc.id
+                existing_job_id = config_data.get('apscheduler_job_id')
                 
-                # Get config details
-                config = self.firestore.collection('monitoring_configs').document(config_id).get()
+                # Get the job status from cron_jobs collection
+                job_status = 'running'
+                if existing_job_id:
+                    job_doc = self.firestore.collection('cron_jobs').document(existing_job_id).get()
+                    if job_doc.exists:
+                        job_status = job_doc.to_dict().get('status', 'running')
                 
-                if config.exists:
-                    config_data = config.to_dict()
-                    
-                    # Recreate job
+                try:
+                    # Recreate job with the SAME job ID to avoid duplicates
                     await self.create_monitoring_job(
                         config_id=config_id,
                         competitor=config_data.get('competitor'),
                         aspects=config_data.get('aspects', []),
                         frequency_hours=config_data.get('frequency_hours'),
                         user_id=config_data.get('user_id'),
-                        notification_preference=config_data.get('notification_preference', 'significant')
+                        notification_preference=config_data.get('notification_preference', 'significant'),
+                        existing_job_id=existing_job_id  # Reuse the same job ID
                     )
+                    
+                    # If job was paused, pause it again
+                    if job_status == 'paused' and existing_job_id:
+                        try:
+                            self.scheduler.pause_job(existing_job_id)
+                            logger.info(f"Restored paused job: {existing_job_id}")
+                        except Exception as e:
+                            logger.warning(f"Could not pause restored job {existing_job_id}: {e}")
+                    
                     loaded_count += 1
+                    
+                except Exception as job_error:
+                    logger.error(f"Failed to load job for config {config_id}: {job_error}")
+                    continue
             
-            logger.info(f"Loaded {loaded_count} active jobs on startup")
+            logger.info(f"Loaded {loaded_count} monitoring jobs on startup")
+            
+            # Clean up any orphaned jobs
+            await self._cleanup_all_orphaned_jobs()
             
         except Exception as e:
             logger.error(f"Failed to load jobs on startup: {e}")
             # Don't raise - continue app startup even if job loading fails
+    
+    async def _cleanup_orphaned_jobs_for_config(self, config_id: str, keep_job_id: Optional[str]):
+        """
+        Clean up orphaned jobs for a specific config.
+        
+        Args:
+            config_id: Config ID to clean up jobs for
+            keep_job_id: Job ID to keep (None to delete all)
+        """
+        try:
+            # Find all jobs for this config
+            jobs = self.firestore.collection('cron_jobs').where(
+                'config_id', '==', config_id
+            ).get()
+            
+            for job_doc in jobs:
+                job_id = job_doc.id
+                if job_id != keep_job_id:
+                    # Remove from scheduler
+                    try:
+                        self.scheduler.remove_job(job_id)
+                    except Exception:
+                        pass  # Job might not exist in scheduler
+                    
+                    # Remove from Firestore
+                    self.firestore.collection('cron_jobs').document(job_id).delete()
+                    logger.info(f"Cleaned up orphaned job: {job_id}")
+        except Exception as e:
+            logger.error(f"Failed to cleanup orphaned jobs for config {config_id}: {e}")
+    
+    async def _cleanup_all_orphaned_jobs(self):
+        """
+        Clean up all orphaned jobs (not referenced by any active config).
+        """
+        try:
+            logger.info("Cleaning up orphaned jobs...")
+            
+            # Get all active config job IDs
+            configs = self.firestore.collection('monitoring_configs').where(
+                'status', 'in', ['active', 'paused']
+            ).get()
+            
+            valid_job_ids = set()
+            for config in configs:
+                job_id = config.to_dict().get('apscheduler_job_id')
+                if job_id:
+                    valid_job_ids.add(job_id)
+            
+            # Find and remove orphaned jobs
+            all_jobs = self.firestore.collection('cron_jobs').stream()
+            orphaned_count = 0
+            
+            for job_doc in all_jobs:
+                job_id = job_doc.id
+                if job_id not in valid_job_ids:
+                    # Remove from scheduler
+                    try:
+                        self.scheduler.remove_job(job_id)
+                    except Exception:
+                        pass
+                    
+                    # Remove from Firestore
+                    self.firestore.collection('cron_jobs').document(job_id).delete()
+                    orphaned_count += 1
+                    logger.info(f"Removed orphaned job: {job_id}")
+            
+            if orphaned_count > 0:
+                logger.info(f"Cleaned up {orphaned_count} orphaned jobs")
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup orphaned jobs: {e}")
     
     def shutdown(self):
         """Shutdown the scheduler gracefully"""

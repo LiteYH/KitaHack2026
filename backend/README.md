@@ -95,13 +95,59 @@ uvicorn main:app --reload --host 127.0.0.1 --port 8000
 GET /health
 ```
 
-### Items API
+### CopilotKit AGUI Endpoints
+
+#### Supervisor Agent AGUI
 ```
-GET    /api/v1/items/          # List all items
-POST   /api/v1/items/          # Create new item
-GET    /api/v1/items/{id}      # Get item by ID
-PATCH  /api/v1/items/{id}      # Update item
-DELETE /api/v1/items/{id}      # Delete item
+/api/v1/copilotkit/supervisor     # AGUI streaming endpoint
+```
+- **Protocol:** AGUI (Agent-UI Interface)
+- **Capabilities:**
+  - Real-time token streaming
+  - Tool call streaming
+  - Human-in-the-loop (HITL) interrupts
+  - Generative UI events
+  - State broadcasting
+
+#### CopilotKit Health Check
+```
+GET /api/v1/copilotkit/health
+```
+
+#### Fallback REST Chat
+```
+POST /api/v1/copilotkit/supervisor/chat
+```
+
+**Request:**
+```json
+{
+  "messages": [
+    {"role": "user", "content": "Hello, who are you?"}
+  ],
+  "thread_id": "thread-123",
+  "user_id": "user-456"
+}
+```
+
+**Response:**
+```json
+{
+  "response": "I am BossolutionAI...",
+  "thread_id": "thread-123"
+}
+```
+
+### Multi-Agent Chat API
+```
+POST   /api/v1/chat             # Multi-agent chat endpoint
+```
+
+### Cron Jobs Management
+```
+GET    /api/v1/crons/           # List all cron jobs
+POST   /api/v1/crons/           # Create new cron job
+DELETE /api/v1/crons/{id}       # Delete cron job
 ```
 
 ## 🔌 Frontend Integration
@@ -111,19 +157,37 @@ The API is configured with CORS to allow requests from:
 - `http://localhost:3001` (Your current frontend)
 - `http://localhost:5173` (Vite default)
 
-### Example TypeScript/React Usage:
+### CopilotKit Frontend Integration
 
 ```typescript
-// Fetch items
-const response = await fetch('http://localhost:8000/api/v1/items/');
-const items = await response.json();
+// app/layout.tsx or app/page.tsx
+import { CopilotKit } from "@copilotkit/react-core";
 
-// Create item
-await fetch('http://localhost:8000/api/v1/items/', {
+export default function RootLayout({ children }) {
+  return (
+    <CopilotKit 
+      runtimeUrl="http://localhost:8000/api/v1/copilotkit/supervisor"
+      agent="supervisor_agent"
+    >
+      {children}
+    </CopilotKit>
+  );
+}
+```
+
+### Standard REST API Usage
+
+```typescript
+// Fetch data
+const response = await fetch('http://localhost:8000/api/v1/chat', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ name: 'Campaign', description: 'Summer sale' })
+  body: JSON.stringify({ 
+    message: 'Monitor Nike',
+    thread_id: 'thread-123'
+  })
 });
+const data = await response.json();
 ```
 pytest
 ```

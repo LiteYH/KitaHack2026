@@ -1,8 +1,9 @@
 ---
 name: notification_management
-description: Manage notification preferences and monitoring job configuration. Helps users set up continuous monitoring with appropriate frequency and alerts. Use for setting up scheduled monitoring jobs, configuring notification preferences, and managing monitoring frequency.
+description: Configure continuous competitor monitoring with smart scheduling and notifications. USE THIS SKILL when user says monitor/track/watch/set up alerts/notify me, wants scheduled or recurring competitor updates (daily/weekly/continuous), after research when patterns suggest ongoing monitoring would be valuable, user asks about monitoring frequency/notification settings/alert preferences, or need to understand monitoring costs or scheduling options. Provides frequency recommendations (hourly to weekly), notification level guidance (always/significant_only/never), cost estimates, and setup workflow explanation.
 metadata:
   category: configuration
+  priority: medium
   version: "1.0"
   tools: create_monitoring_config
 ---

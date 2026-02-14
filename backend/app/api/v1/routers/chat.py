@@ -233,3 +233,81 @@ async def get_chat_messages(
     except Exception as e:
         logger.error(f"Failed to get chat messages for user {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to retrieve messages: {str(e)}")
+
+
+@router.get("/history/{thread_id}")
+async def get_thread_history(
+    thread_id: str,
+    user_id: str = Depends(get_current_user_id),
+    limit: int = Query(100, description="Maximum number of messages to return")
+):
+    """
+    Get chat history for a specific thread.
+    
+    Retrieves all messages (user, assistant, tool calls, etc.) for a conversation thread.
+    Used to restore chat history when loading a previous conversation.
+    
+    Args:
+        thread_id: Thread/conversation ID
+        user_id: Current user's ID (from auth token)
+        limit: Maximum number of messages to return
+    
+    Returns:
+        List of messages ordered by timestamp (oldest first)
+    """
+    try:
+        if not multi_agent_service._chat_history:
+            raise HTTPException(status_code=503, detail="Chat history service not initialized")
+        
+        messages = await multi_agent_service._chat_history.get_thread_messages(
+            thread_id=thread_id,
+            user_id=user_id,
+            limit=limit
+        )
+        
+        logger.info(f"Retrieved {len(messages)} messages from thread {thread_id} for user {user_id}")
+        return messages
+        
+    except Exception as e:
+        logger.error(f"Failed to get thread history for {thread_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve thread history: {str(e)}")
+
+
+@router.delete("/history/{thread_id}")
+async def clear_thread_history(
+    thread_id: str,
+    user_id: str = Depends(get_current_user_id)
+):
+    """
+    Clear all messages in a thread.
+    
+    Deletes all chat history for a specific conversation thread.
+    Also removes the thread metadata from Firestore.
+    
+    Args:
+        thread_id: Thread/conversation ID to clear
+        user_id: Current user's ID (from auth token)
+    
+    Returns:
+        Status message with count of deleted messages
+    """
+    try:
+        if not multi_agent_service._chat_history:
+            raise HTTPException(status_code=503, detail="Chat history service not initialized")
+        
+        deleted_count = await multi_agent_service._chat_history.clear_thread(
+            thread_id=thread_id,
+            user_id=user_id
+        )
+        
+        logger.info(f"Cleared {deleted_count} messages from thread {thread_id} for user {user_id}")
+        return {
+            "status": "success",
+            "thread_id": thread_id,
+            "deleted_count": deleted_count,
+            "message": f"Cleared {deleted_count} messages"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to clear thread {thread_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to clear thread: {str(e)}")

@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, Optional
 
 from pydantic import Field
@@ -36,11 +37,16 @@ class Settings(BaseSettings):
     linkedin_api_token: Optional[str] = Field(default=None, description="LinkedIn API Token")
     twitter_api_key: Optional[str] = Field(default=None, description="Twitter/X API Key")
 
+    # Email / Notification Settings
+    sendgrid_api_key: Optional[str] = Field(default=None, alias="SENDGRID_API_KEY", description="SendGrid API Key for email notifications")
+    sendgrid_from_email: str = Field(default="noreply@bossolutionai.com", alias="SENDGRID_FROM_EMAIL", description="SendGrid sender email")
+    sendgrid_from_name: str = Field(default="BossolutionAI", alias="SENDGRID_FROM_NAME", description="SendGrid sender name")
+
     # Uploads
     upload_dir: str = Field(default="temp_uploads", description="Directory for uploaded files")
 
     class Config:
-        env_file = ".env"
+        env_file = str(Path(__file__).resolve().parents[2] / ".env")
         env_file_encoding = "utf-8"
         populate_by_name = True  # Allow both field name and alias
 

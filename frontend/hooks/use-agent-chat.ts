@@ -1,36 +1,62 @@
 /**
  * useAgentChat Hook
- * 
- * Custom hook for multi-agent chat with streaming and HITL support
+ *
+ * Custom hook for multi-agent chat with full streaming support.
+ * Captures ALL intermediate events: tool calls, tool results, agent status, tokens, HITL.
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { 
-  streamAgentMessage, 
+import {
+  streamAgentMessage,
   streamResumeAgent,
-  getChatMessages,
-  type StreamEvent, 
+  type StreamEvent,
   type AgentChatRequest,
   type HITLDecision,
   type InterruptData,
-  type ChatMessage as APIChatMessage,
 } from '@/lib/api/agent';
+import {
+  loadThreadHistory,
+  clearThreadHistory,
+  type ChatHistoryMessage,
+} from '@/lib/api/chat-history';
+
+// ── Message types ────────────────────────────────────────────────────
+
+export type MessageRole =
+  | 'user'
+  | 'assistant'
+  | 'tool_call'
+  | 'tool_result'
+  | 'agent_status'
+  | 'hitl'
+  | 'system';
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system' | 'hitl';
+  role: MessageRole;
   content: string;
+  /** Tool or agent name */
   agent?: string;
+  /** Tool call arguments (for tool_call messages) */
+  toolArgs?: Record<string, any>;
+  /** Tool call ID linking call → result */
+  toolCallId?: string;
+  /** Graph node that produced the message */
+  node?: string;
+  /** HITL interrupt data */
   interruptData?: InterruptData[];
+  /** HITL resolution data */
   resolution?: {
     type: 'approve' | 'edit' | 'reject';
     decisions: HITLDecision[];
     timestamp: number;
   };
+  /** Timestamp */
+  timestamp: number;
 }
 
 export interface InterruptState {
-  messageId: string; // Link to the message in chat history
+  messageId: string;
   threadId: string;
   agentName: string;
   data: InterruptData[];
@@ -54,266 +80,410 @@ export function useAgentChat(userId?: string): UseAgentChatReturn {
   const [interrupt, setInterrupt] = useState<InterruptState | null>(null);
   const [currentAgent, setCurrentAgent] = useState<string | null>(null);
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set());
-  // Initialize thread_id immediately - persists across all messages until clearMessages
-  const [threadId, setThreadId] = useState<string>(() => crypto.randomUUID());
   
+  // Load thread ID from localStorage or generate new one
+  const [threadId, setThreadId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const savedThreadId = localStorage.getItem('chat_thread_id');
+      if (savedThreadId) {
+        console.log('[THREAD] Loaded thread from localStorage:', savedThreadId);
+        return savedThreadId;
+      }
+    }
+    const newThreadId = crypto.randomUUID();
+    console.log('[THREAD] Created new thread:', newThreadId);
+    return newThreadId;
+  });
+
   const cleanupRef = useRef<(() => void) | null>(null);
   const currentMessageRef = useRef<ChatMessage | null>(null);
+  const currentAgentRef = useRef<string | null>(null);
+  const threadIdRef = useRef<string>(threadId);
 
-  // Clean up on unmount
+  // Keep refs synced
+  useEffect(() => { currentAgentRef.current = currentAgent; }, [currentAgent]);
+  useEffect(() => { 
+    threadIdRef.current = threadId;
+    // Persist thread ID to localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chat_thread_id', threadId);
+    }
+  }, [threadId]);
+
   useEffect(() => {
     return () => {
       cleanupRef.current?.();
     };
   }, []);
 
-  const sendMessage = useCallback((text: string) => {
-    // Add user message
-    const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: text,
-    };
-    setMessages((prev) => [...prev, userMessage]);
-    setIsLoading(true);
-    setInterrupt(null);
+  // Auto-collapse intermediate messages when streaming completes
+  const prevLoadingRef = useRef(isLoading);
+  useEffect(() => {
+    // Detect when streaming transitions from true to false
+    if (prevLoadingRef.current && !isLoading) {
+      // Find all collapsible intermediate messages that should be auto-collapsed
+      const messagesToCollapse = messages
+        .filter((msg) => {
+          // Collapse tool calls and tool results
+          if (msg.role === 'tool_call' || msg.role === 'tool_result') {
+            return true;
+          }
+          // Collapse resolved HITL cards
+          if (msg.role === 'hitl' && msg.resolution) {
+            return true;
+          }
+          return false;
+        })
+        .map((msg) => msg.id);
 
-    // Prepare assistant message
-    currentMessageRef.current = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: '',
-    };
-
-    const request: AgentChatRequest = {
-      message: text,
-      thread_id: threadId, // Always use the persistent thread_id
-      user_id: userId,
-    };
-
-    cleanupRef.current = streamAgentMessage(
-      request,
-      (event: StreamEvent) => {
-        console.log('[STREAM EVENT]', event.type, event);
-        switch (event.type) {
-          case 'routing':
-            console.log('[ROUTING] Agent:', event.agent, 'Task:', event.task);
-            setCurrentAgent(event.agent);
-            if (currentMessageRef.current) {
-              currentMessageRef.current.agent = event.agent;
-            }
-            break;
-
-          case 'token':
-            console.log('[TOKEN] Raw content type:', typeof event.content, 'Value:', event.content);
-            if (currentMessageRef.current) {
-              // Normalize content: AIMessage.content can be a list of blocks
-              const tokenContent = typeof event.content === 'string'
-                ? event.content
-                : Array.isArray(event.content)
-                  ? (event.content as Array<{text?: string}>).map((b) => b.text ?? '').join('')
-                  : String(event.content ?? '');
-              console.log('[TOKEN] Normalized content:', tokenContent);
-              currentMessageRef.current.content += tokenContent;
-              setMessages((prev) => {
-                const lastMsg = prev[prev.length - 1];
-                if (lastMsg?.id === currentMessageRef.current?.id) {
-                  // Update existing message
-                  return [
-                    ...prev.slice(0, -1),
-                    { ...currentMessageRef.current! },
-                  ];
-                } else {
-                  // Add new message
-                  return [...prev, { ...currentMessageRef.current! }];
-                }
-              });
-            }
-            break;
-
-          case 'interrupt':
-            // Save interrupt state with agent name AND add to message history
-            console.log('[INTERRUPT] Data:', event.data);
-            const interruptMessageId = crypto.randomUUID();
-            const interruptMessage: ChatMessage = {
-              id: interruptMessageId,
-              role: 'hitl',
-              content: 'Approval required for monitoring configuration',
-              agent: currentAgent || 'competitor_monitoring',
-              interruptData: event.data,
-            };
-            setMessages((prev) => [...prev, interruptMessage]);
-            // Use the existing thread ID
-            setInterrupt({
-              messageId: interruptMessageId,
-              threadId: threadId,
-              agentName: currentAgent || 'competitor_monitoring',
-              data: event.data,
-            });
-            setIsLoading(false);
-            break;
-
-          case 'done':
-            console.log('[DONE] Stream completed');
-            setIsLoading(false);
-            currentMessageRef.current = null;
-            break;
-
-          case 'error':
-            console.error('[ERROR] Stream error:', event.message);
-            setIsLoading(false);
-            if (currentMessageRef.current) {
-              currentMessageRef.current.content = 
-                `Error: ${event.message}. Please try again.`;
-              setMessages((prev) => [...prev, { ...currentMessageRef.current! }]);
-            }
-            currentMessageRef.current = null;
-            break;
-        }
-      },
-      (error) => {
-        console.error('[STREAM] Connection error:', error);
-        setIsLoading(false);
-        const errorMessage: ChatMessage = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: 'Sorry, I encountered an error. Please try again.',
-        };
-        setMessages((prev) => [...prev, errorMessage]);
-        currentMessageRef.current = null;
+      if (messagesToCollapse.length > 0) {
+        setCollapsedMessages((prev) => {
+          const next = new Set(prev);
+          messagesToCollapse.forEach((id) => next.add(id));
+          return next;
+        });
       }
-    );
+    }
+    prevLoadingRef.current = isLoading;
+  }, [isLoading, messages]);
+
+  // Load chat history from Firestore on mount (only if userId is available)
+  useEffect(() => {
+    if (!userId || !threadId) return;
+
+    let mounted = true;
+
+    const loadHistory = async () => {
+      try {
+        setIsLoading(true);
+        
+        // Load thread history (includes both chat and monitoring messages)
+        const historyMessages = await loadThreadHistory(threadId);
+
+        if (!mounted) return;
+
+        // Convert history messages to ChatMessage format
+        const chatMessages: ChatMessage[] = historyMessages.map((msg) => {
+          // Parse timestamp
+          let timestamp = Date.now();
+          if (msg.created_at) {
+            const parsed = Date.parse(msg.created_at);
+            if (!isNaN(parsed)) timestamp = parsed;
+          }
+
+          return {
+            id: msg.id,
+            role: msg.role as MessageRole,
+            content: msg.content,
+            agent: msg.agent,
+            toolArgs: msg.tool_args,
+            toolCallId: msg.tool_call_id,
+            node: msg.node,
+            timestamp,
+          };
+        });
+
+        // Sort by timestamp
+        chatMessages.sort((a, b) => a.timestamp - b.timestamp);
+
+        if (chatMessages.length > 0) {
+          setMessages(chatMessages);
+          console.log(`[HISTORY] Loaded ${historyMessages.length} messages from thread ${threadId}`);
+        }
+      } catch (error) {
+        console.error('[HISTORY] Failed to load chat history:', error);
+        // Don't block the UI if history fails to load
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadHistory();
+
+    return () => {
+      mounted = false;
+    };
   }, [userId, threadId]);
 
-  const resumeWithDecision = useCallback((decisions: HITLDecision[]) => {
-    if (!interrupt) return;
+  /**
+   * Process a stream event and update messages accordingly.
+   * Handles ALL event types from the backend.
+   */
+  const processEvent = useCallback(
+    (event: StreamEvent) => {
+      switch (event.type) {
+        case 'metadata':
+          // Thread info — nothing to show in UI
+          break;
 
-    console.log('[RESUME] Starting with decisions:', decisions);
-    
-    // Update the interrupt message with resolution
-    const decisionType = decisions[0]?.type || 'approve';
-    setMessages((prev) => 
-      prev.map((msg) => 
-        msg.id === interrupt.messageId
-          ? {
-              ...msg,
-              resolution: {
-                type: decisionType,
-                decisions,
-                timestamp: Date.now(),
-              },
-            }
-          : msg
-      )
-    );
-    
-    setIsLoading(true);
-    setInterrupt(null);
+        case 'agent_status': {
+          // Which graph node is running
+          const agentName = event.node || 'unknown';
+          setCurrentAgent(agentName);
+          currentAgentRef.current = agentName;
 
-    // Prepare assistant message for resume
-    currentMessageRef.current = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: '',
-    };
+          const statusMsg: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'agent_status',
+            content: `Agent node: **${agentName}**`,
+            agent: agentName,
+            node: event.node,
+            timestamp: Date.now(),
+          };
+          setMessages((prev) => [...prev, statusMsg]);
+          break;
+        }
 
-    cleanupRef.current = streamResumeAgent(
-      {
-        agent_name: interrupt.agentName,
-        thread_id: interrupt.threadId,
-        decisions,
-        user_id: userId,
-      },
-      (event: StreamEvent) => {
-        console.log('[RESUME EVENT]', event.type, event);
-        switch (event.type) {
-          case 'token':
-            console.log('[RESUME TOKEN] Raw content type:', typeof event.content, 'Value:', event.content);
-            if (currentMessageRef.current) {
-              // Normalize content: AIMessage.content can be a list of blocks
-              const resumeTokenContent = typeof event.content === 'string'
+        case 'tool_call': {
+          // Agent decided to call a tool
+          const toolCallMsg: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'tool_call',
+            content: `Calling **${event.name}**`,
+            agent: event.name,
+            toolArgs: event.args,
+            toolCallId: event.tool_call_id,
+            node: event.node,
+            timestamp: Date.now(),
+          };
+          setMessages((prev) => [...prev, toolCallMsg]);
+          setCurrentAgent(event.name);
+          currentAgentRef.current = event.name;
+          break;
+        }
+
+        case 'tool_result': {
+          // Result from tool execution
+          const toolResultMsg: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'tool_result',
+            content: event.content || '(empty result)',
+            agent: event.name,
+            toolCallId: event.tool_call_id,
+            node: event.node,
+            timestamp: Date.now(),
+          };
+          setMessages((prev) => [...prev, toolResultMsg]);
+          break;
+        }
+
+        case 'token': {
+          // LLM streaming token
+          if (currentMessageRef.current) {
+            const tokenContent =
+              typeof event.content === 'string'
                 ? event.content
                 : Array.isArray(event.content)
-                  ? (event.content as Array<{text?: string}>).map((b) => b.text ?? '').join('')
+                  ? (event.content as Array<{ text?: string }>)
+                      .map((b) => b.text ?? '')
+                      .join('')
                   : String(event.content ?? '');
-              console.log('[RESUME TOKEN] Normalized content:', resumeTokenContent);
-              currentMessageRef.current.content += resumeTokenContent;
-              setMessages((prev) => {
-                const lastMsg = prev[prev.length - 1];
-                if (lastMsg?.id === currentMessageRef.current?.id) {
-                  return [
-                    ...prev.slice(0, -1),
-                    { ...currentMessageRef.current! },
-                  ];
-                } else {
-                  return [...prev, { ...currentMessageRef.current! }];
-                }
-              });
+
+            currentMessageRef.current.content += tokenContent;
+            if (event.node) {
+              currentMessageRef.current.node = event.node;
             }
-            break;
 
-          case 'interrupt':
-            // Another interrupt occurred
-            console.log('[RESUME INTERRUPT] Another interrupt:', event.data);
-            const newInterruptMessageId = crypto.randomUUID();
-            const newInterruptMessage: ChatMessage = {
-              id: newInterruptMessageId,
-              role: 'hitl',
-              content: 'Additional approval required',
-              agent: interrupt.agentName,
-              interruptData: event.data,
-            };
-            setMessages((prev) => [...prev, newInterruptMessage]);
-            setInterrupt({
-              messageId: newInterruptMessageId,
-              threadId: interrupt.threadId,
-              agentName: interrupt.agentName,
-              data: event.data,
+            setMessages((prev) => {
+              const idx = prev.findIndex(
+                (m) => m.id === currentMessageRef.current?.id
+              );
+              if (idx !== -1) {
+                // Assistant message exists — remove it and re-append at the end
+                // This ensures it always appears AFTER all intermediate messages
+                const filtered = prev.filter((m) => m.id !== currentMessageRef.current?.id);
+                return [...filtered, { ...currentMessageRef.current! }];
+              } else {
+                // First token — append new assistant message
+                return [...prev, { ...currentMessageRef.current! }];
+              }
             });
-            setIsLoading(false);
-            break;
+          }
+          break;
+        }
 
-          case 'done':
-            console.log('[RESUME DONE] Resume completed');
-            setIsLoading(false);
-            currentMessageRef.current = null;
-            break;
+        case 'interrupt': {
+          // HITL approval request
+          const interruptMessageId = crypto.randomUUID();
+          const interruptMessage: ChatMessage = {
+            id: interruptMessageId,
+            role: 'hitl',
+            content: 'Approval required for monitoring configuration',
+            agent: currentAgentRef.current || 'competitor_monitoring',
+            interruptData: event.data,
+            timestamp: Date.now(),
+          };
+          setMessages((prev) => [...prev, interruptMessage]);
+          setInterrupt({
+            messageId: interruptMessageId,
+            threadId: threadIdRef.current,
+            agentName: currentAgentRef.current || 'competitor_monitoring',
+            data: event.data,
+          });
+          setIsLoading(false);
+          break;
+        }
 
-          case 'error':
-            console.error('[RESUME ERROR]:', event.message);
-            setIsLoading(false);
-            const errorMessage: ChatMessage = {
+        case 'done':
+          setIsLoading(false);
+          currentMessageRef.current = null;
+          break;
+
+        case 'error':
+          setIsLoading(false);
+          if (currentMessageRef.current) {
+            currentMessageRef.current.content = `Error: ${event.message}. Please try again.`;
+            setMessages((prev) => [...prev, { ...currentMessageRef.current! }]);
+          } else {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: `Error: ${event.message}. Please try again.`,
+                timestamp: Date.now(),
+              },
+            ]);
+          }
+          currentMessageRef.current = null;
+          break;
+      }
+    },
+    []
+  );
+
+  const sendMessage = useCallback(
+    (text: string) => {
+      // Add user message
+      const userMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: text,
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, userMessage]);
+      setIsLoading(true);
+      setInterrupt(null);
+
+      // Prepare assistant message ref for streaming tokens
+      currentMessageRef.current = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+      };
+
+      const request: AgentChatRequest = {
+        message: text,
+        thread_id: threadIdRef.current,
+        user_id: userId,
+      };
+
+      cleanupRef.current = streamAgentMessage(
+        request,
+        processEvent,
+        (error) => {
+          console.error('[STREAM] Connection error:', error);
+          setIsLoading(false);
+          setMessages((prev) => [
+            ...prev,
+            {
               id: crypto.randomUUID(),
               role: 'assistant',
-              content: `Error: ${event.message}`,
-            };
-            setMessages((prev) => [...prev, errorMessage]);
-            currentMessageRef.current = null;
-            break;
+              content: 'Sorry, I encountered a connection error. Please try again.',
+              timestamp: Date.now(),
+            },
+          ]);
+          currentMessageRef.current = null;
         }
-      },
-      (error) => {
-        console.error('[RESUME] Stream error:', error);
-        setIsLoading(false);
-        const errorMessage: ChatMessage = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: 'Sorry, I encountered an error resuming. Please try again.',
-        };
-        setMessages((prev) => [...prev, errorMessage]);
-        currentMessageRef.current = null;
-      }
-    );
-  }, [interrupt, userId]);
+      );
+    },
+    [userId, processEvent]
+  );
 
-  const clearMessages = useCallback(() => {
+  const resumeWithDecision = useCallback(
+    (decisions: HITLDecision[]) => {
+      if (!interrupt) return;
+
+      // Update the interrupt message with resolution
+      const decisionType = decisions[0]?.type || 'approve';
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === interrupt.messageId
+            ? {
+                ...msg,
+                resolution: {
+                  type: decisionType,
+                  decisions,
+                  timestamp: Date.now(),
+                },
+              }
+            : msg
+        )
+      );
+
+      setIsLoading(true);
+      setInterrupt(null);
+
+      // Prepare assistant message ref for resume tokens
+      currentMessageRef.current = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+      };
+
+      cleanupRef.current = streamResumeAgent(
+        {
+          agent_name: interrupt.agentName,
+          thread_id: interrupt.threadId,
+          decisions,
+          user_id: userId,
+        },
+        processEvent,
+        (error) => {
+          console.error('[RESUME] Stream error:', error);
+          setIsLoading(false);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: 'Sorry, I encountered an error resuming. Please try again.',
+              timestamp: Date.now(),
+            },
+          ]);
+          currentMessageRef.current = null;
+        }
+      );
+    },
+    [interrupt, userId, processEvent]
+  );
+
+  const clearMessages = useCallback(async () => {
+    // Clear from Firestore if user is authenticated
+    if (userId && threadIdRef.current) {
+      try {
+        await clearThreadHistory(threadIdRef.current);
+        console.log(`[HISTORY] Cleared thread ${threadIdRef.current} from Firestore`);
+      } catch (error) {
+        console.error('[HISTORY] Failed to clear thread history:', error);
+        // Continue with local clear even if Firestore clear fails
+      }
+    }
+
+    // Clear local state
     setMessages([]);
-    setThreadId(crypto.randomUUID()); // Generate new thread for new conversation
+    const newThreadId = crypto.randomUUID();
+    setThreadId(newThreadId);
+    threadIdRef.current = newThreadId;
     setCurrentAgent(null);
+    currentAgentRef.current = null;
     setInterrupt(null);
     setCollapsedMessages(new Set());
-    console.log('[CLEAR] Starting new conversation with new thread ID');
-  }, []);
+  }, [userId]);
 
   const toggleMessageCollapse = useCallback((messageId: string) => {
     setCollapsedMessages((prev) => {

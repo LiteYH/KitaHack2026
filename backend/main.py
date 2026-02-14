@@ -1,15 +1,29 @@
 from contextlib import asynccontextmanager
 import logging
+import os
 import sys
+import warnings
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# Load settings first to get API keys
 from app.core.config import settings
+
+# Set GOOGLE_API_KEY in environment BEFORE any langchain imports
+# This prevents langchain from trying to auto-detect Vertex AI
+if settings.google_api_key:
+    os.environ["GOOGLE_API_KEY"] = settings.google_api_key
 from app.core.firebase import initialize_firebase, get_db
 from app.api.v1 import api_router
 from app.services import CronService, monitoring_service, notification_service
 from app.services.multi_agent_service import multi_agent_service
+
+# Suppress LangChain internal warnings that aren't actual errors
+# These are deprecation notices and package availability checks
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="langchain")
+warnings.filterwarnings("ignore", message=".*langchain-google-vertexai.*")
+warnings.filterwarnings("ignore", message=".*ChatVertexAI.*")
 
 # Configure logging to output to console
 logging.basicConfig(
@@ -59,8 +73,9 @@ async def lifespan(app: FastAPI):
             firestore_client=db,
         )
         logger.info("✅ Services injected into multi_agent_service")
+        
     except Exception as e:
-        logger.error(f"❌ Failed to initialize CronService: {e}")
+        logger.error(f"❌ Failed to initialize services: {e}")
         # Don't fail startup, just log the error
     
     print("🚀 BossolutionAI API is ready!")

@@ -1,6 +1,7 @@
 /**
  * Chat API Client - Multi-Agent System
- * Handles communication with the unified multi-agent backend
+ * Handles communication with the unified multi-agent backend via SSE streaming.
+ * Captures ALL intermediate events: tool calls, tool results, agent routing, tokens.
  */
 
 import { getAuthHeaders } from '../auth-headers';
@@ -22,18 +23,47 @@ export interface AgentChatResponse {
   agent?: string;
 }
 
-export type StreamEventType = 'routing' | 'token' | 'interrupt' | 'done' | 'error';
+export type StreamEventType =
+  | 'metadata'
+  | 'token'
+  | 'tool_call'
+  | 'tool_result'
+  | 'agent_status'
+  | 'interrupt'
+  | 'done'
+  | 'error';
 
-export interface RoutingEvent {
-  type: 'routing';
-  agent: string;
-  task: string;
-  confidence: number;
+export interface MetadataEvent {
+  type: 'metadata';
+  thread_id: string;
 }
 
 export interface TokenEvent {
   type: 'token';
   content: string;
+  node?: string;
+}
+
+export interface ToolCallEvent {
+  type: 'tool_call';
+  name: string;
+  args: Record<string, any>;
+  tool_call_id?: string;
+  node?: string;
+}
+
+export interface ToolResultEvent {
+  type: 'tool_result';
+  name: string;
+  content: string;
+  tool_call_id?: string;
+  node?: string;
+}
+
+export interface AgentStatusEvent {
+  type: 'agent_status';
+  node: string;
+  namespace?: string;
 }
 
 export interface InterruptEvent {
@@ -66,7 +96,15 @@ export interface DoneEvent {
   type: 'done';
 }
 
-export type StreamEvent = RoutingEvent | TokenEvent | InterruptEvent | ErrorEvent | DoneEvent;
+export type StreamEvent =
+  | MetadataEvent
+  | TokenEvent
+  | ToolCallEvent
+  | ToolResultEvent
+  | AgentStatusEvent
+  | InterruptEvent
+  | ErrorEvent
+  | DoneEvent;
 
 export interface HITLDecision {
   type: 'approve' | 'edit' | 'reject';
@@ -182,6 +220,22 @@ export function streamAgentMessage(
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6)) as StreamEvent;
+              
+              // Filter out LangChain internal warnings/errors that aren't user-facing
+              if (data.type === 'error') {
+                const errorMsg = data.message.toLowerCase();
+                const isInternalWarning = [
+                  'chatvertexai',
+                  'langchain-google-vertexai',
+                  'deprecationwarning',
+                ].some(ignore => errorMsg.includes(ignore));
+                
+                if (isInternalWarning) {
+                  console.debug('Suppressed internal LangChain warning:', data.message);
+                  continue; // Skip sending this error to the UI
+                }
+              }
+              
               onEvent(data);
 
               if (data.type === 'done') {
@@ -283,6 +337,22 @@ export function streamResumeAgent(
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6)) as StreamEvent;
+              
+              // Filter out LangChain internal warnings/errors that aren't user-facing
+              if (data.type === 'error') {
+                const errorMsg = data.message.toLowerCase();
+                const isInternalWarning = [
+                  'chatvertexai',
+                  'langchain-google-vertexai',
+                  'deprecationwarning',
+                ].some(ignore => errorMsg.includes(ignore));
+                
+                if (isInternalWarning) {
+                  console.debug('Suppressed internal LangChain warning:', data.message);
+                  continue; // Skip sending this error to the UI
+                }
+              }
+              
               onEvent(data);
 
               if (data.type === 'done') {

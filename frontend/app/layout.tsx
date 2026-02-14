@@ -25,7 +25,9 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${spaceGrotesk.variable} font-sans antialiased`}>
         <QueryProvider>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            {children}
+          </AuthProvider>
         </QueryProvider>
       </body>
     </html>

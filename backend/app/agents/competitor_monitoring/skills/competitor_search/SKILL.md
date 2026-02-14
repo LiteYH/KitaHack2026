@@ -1,8 +1,9 @@
 ---
 name: competitor_search
-description: Search and research competitors using Tavily Search API. Finds recent news, product launches, pricing changes, and social media activity for any given competitor or brand. Use for monitoring, tracking, and competitive intelligence gathering.
+description: Execute comprehensive competitor research using Tavily Search API to find current, real-time information. USE THIS SKILL when user mentions a specific competitor name or brand, asks to research/look up/find/search, needs current information about products/pricing/launches/news/social media, gathers competitive intelligence, or wants to know what's new or recent updates from a competitor. This skill provides clear search strategies, output formatting guidelines, significance rating frameworks, and source citation best practices.
 metadata:
   category: research
+  priority: critical
   version: "1.0"
   tools: search_competitor, search_competitor_news
 ---
