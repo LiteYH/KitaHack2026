@@ -15,25 +15,37 @@ class OrchestratorService:
     """Orchestrates the flow between intent analysis, data fetching, and response generation"""
     
     # Keywords that indicate the user wants campaign data
+    # Must be specific to campaigns, not general marketing terms
     CAMPAIGN_KEYWORDS = [
-        "campaign", "campaigns", "marketing", "ad", "ads", "advertisement",
-        "optimize", "optimization", "performance", "roi", "roas", "ctr", "cvr",
+        "campaign", "campaigns", "ad", "ads", "advertisement",
+        "roi", "roas", "ctr", "cvr",
         "budget", "spending", "spend", "conversion", "clicks", "impressions",
-        "ongoing", "paused", "active", "running", "current"
     ]
     
-    # Status keywords
+    # Keywords that indicate a simple informational query (not deep analysis)
+    SIMPLE_QUERY_KEYWORDS = [
+        "how many", "count", "number of", "list", "show me", "tell me which",
+        "what are", "which campaigns"
+    ]
+    
+    # Keywords that indicate the query is NOT about user's own campaigns
+    EXCLUSION_KEYWORDS = [
+        "competitor", "competitors", "competition", "rival", "rivals",
+        "other companies", "other brands", "market leaders", "industry"
+    ]
+    
+    # Status keywords - these are more specific
     STATUS_KEYWORDS = {
         "ongoing": ["ongoing", "active", "running", "current", "live"],
         "paused": ["paused", "stopped", "inactive", "ended", "finished"]
     }
     
-    # Platform keywords
+    # Platform keywords with word boundaries
     PLATFORM_KEYWORDS = {
-        "instagram": ["instagram", "ig", "insta"],
-        "facebook": ["facebook", "fb"],
-        "kol": ["kol", "influencer", "influencers"],
-        "e-commerce": ["ecommerce", "e-commerce", "online store", "shop"]
+        "Instagram": [r"\binstagram\b", r"\binsta\b"],
+        "Facebook": [r"\bfacebook\b", r"\bfb\b"],
+        "KOL": [r"\bkol\b", r"\binfluencer\b", r"\binfluencers\b"],
+        "E-commerce": [r"\becommerce\b", r"\be-commerce\b", r"\bonline store\b", r"\bshop\b"]
     }
     
     def __init__(self):
@@ -58,45 +70,62 @@ class OrchestratorService:
                 "needs_campaign_data": bool,
                 "status_filter": str | None,
                 "platform_filter": str | None,
-                "intent_type": str  # e.g., "optimization", "analysis", "comparison", "general"
+                "intent_type": str,
+                "is_simple_query": bool
             }
         """
         message_lower = user_message.lower()
         
+        # First check for exclusion keywords (competitor analysis, etc.)
+        has_exclusion = any(keyword in message_lower for keyword in self.EXCLUSION_KEYWORDS)
+        
+        if has_exclusion:
+            # This is NOT about user's campaigns
+            return {
+                "needs_campaign_data": False,
+                "status_filter": None,
+                "platform_filter": None,
+                "intent_type": "general",
+                "is_simple_query": False
+            }
+        
         # Check if message mentions campaigns
         needs_campaign_data = any(keyword in message_lower for keyword in self.CAMPAIGN_KEYWORDS)
         
-        # Determine status filter
+        # Check if this is a simple informational query
+        is_simple_query = any(phrase in message_lower for phrase in self.SIMPLE_QUERY_KEYWORDS)
+        
+        # Determine status filter - only if explicitly mentioned
         status_filter = None
+        status_mentioned = False
         for status, keywords in self.STATUS_KEYWORDS.items():
-            if any(keyword in message_lower for keyword in keywords):
+            if any(re.search(rf"\b{keyword}\b", message_lower) for keyword in keywords):
                 status_filter = status
+                status_mentioned = True
                 break
         
-        # Determine platform filter
+        # Determine platform filter - use regex for word boundaries
         platform_filter = None
-        for platform, keywords in self.PLATFORM_KEYWORDS.items():
-            if any(keyword in message_lower for keyword in keywords):
-                # Capitalize first letter for Firestore query
-                platform_filter = platform.title() if platform != "kol" else "KOL"
-                if platform == "e-commerce":
-                    platform_filter = "E-commerce"
+        for platform, patterns in self.PLATFORM_KEYWORDS.items():
+            if any(re.search(pattern, message_lower) for pattern in patterns):
+                platform_filter = platform
                 break
         
         # Determine intent type
         intent_type = "general"
-        if any(word in message_lower for word in ["optimize", "optimization", "improve", "enhance", "better"]):
+        if any(re.search(rf"\b{word}\b", message_lower) for word in ["optimize", "optimization", "improve", "enhance", "better"]):
             intent_type = "optimization"
-        elif any(word in message_lower for word in ["analyze", "analysis", "performance", "how", "doing"]):
+        elif any(re.search(rf"\b{word}\b", message_lower) for word in ["analyze", "analysis", "performance", "doing", "performing"]):
             intent_type = "analysis"
-        elif any(word in message_lower for word in ["compare", "comparison", "vs", "versus", "difference"]):
+        elif any(re.search(rf"\b{word}\b", message_lower) for word in ["compare", "comparison", "versus", "difference"]):
             intent_type = "comparison"
         
         return {
             "needs_campaign_data": needs_campaign_data,
             "status_filter": status_filter,
             "platform_filter": platform_filter,
-            "intent_type": intent_type
+            "intent_type": intent_type,
+            "is_simple_query": is_simple_query
         }
     
     async def get_relevant_campaigns(
@@ -191,9 +220,19 @@ class OrchestratorService:
         # Add user's original question
         context_parts.append(f"\n\n# USER'S QUESTION:\n{user_message}\n")
         
-        # Add specific instructions based on intent
+        # Add specific instructions based on query type
         context_parts.append("\n# INSTRUCTIONS:")
-        if intent["intent_type"] == "optimization":
+        
+        # Check if this is a simple query
+        if intent.get("is_simple_query", False):
+            context_parts.append(
+                "The user is asking a simple, straightforward question. Answer DIRECTLY and CONCISELY first. "
+                "Provide the specific information requested (counts, names, etc.) in a clear, brief manner. \n\n"
+                "After answering their question, you may optionally ask: \"Would you like me to provide "
+                "a detailed analysis and optimization recommendations for these campaigns?\"\n\n"
+                "Do NOT provide full analysis unless specifically requested."
+            )
+        elif intent["intent_type"] == "optimization":
             context_parts.append(
                 "Analyze the campaign performance data above and provide specific, actionable optimization recommendations. "
                 "Focus on campaigns with low CTR, CVR, or ROAS. Suggest concrete improvements for budget allocation, "

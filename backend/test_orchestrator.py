@@ -26,8 +26,10 @@ async def test_orchestrator():
         "How can I optimize my current ongoing campaigns?",
         "Show me my paused campaigns performance",
         "What's my Instagram campaign doing?",
-        "How are my campaigns performing?",
-        "Tell me about AI in marketing"  # This shouldn't fetch campaigns
+        "Currently how many campaigns are ongoing? And how many campaigns are paused?",
+        "Tell me about AI in marketing",  # This shouldn't fetch campaigns
+        "Analyze my competitors' marketing strategies",  # This shouldn't fetch campaigns
+        "Which campaigns are running on Facebook?"
     ]
     
     for i, query in enumerate(test_queries, 1):
@@ -42,6 +44,7 @@ async def test_orchestrator():
         print(f"   Status Filter: {intent['status_filter']}")
         print(f"   Platform Filter: {intent['platform_filter']}")
         print(f"   Intent Type: {intent['intent_type']}")
+        print(f"   Is Simple Query: {intent.get('is_simple_query', False)}")
         
         # Fetch campaigns if needed
         if intent['needs_campaign_data']:
