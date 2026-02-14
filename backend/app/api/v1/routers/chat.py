@@ -19,7 +19,7 @@ async def send_message(request: ChatRequest):
         ChatResponse with the AI's response
     """
     try:
-        response_text = await chat_service.chat(
+        response_text, campaign_context = await chat_service.chat(
             user_message=request.message,
             conversation_history=request.conversation_history,
             user_id=request.user_id

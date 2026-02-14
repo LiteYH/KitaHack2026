@@ -1,8 +1,9 @@
 import os
-from typing import List, Optional, AsyncGenerator
+from typing import List, Optional, AsyncGenerator, Dict, Any
 import google.generativeai as genai
 from app.core.config import settings
 from app.schemas.chat import ChatMessage
+from app.services.orchestrator_service import orchestrator_service
 
 
 class ChatService:
@@ -84,23 +85,30 @@ Always aim to:
         user_message: str,
         conversation_history: Optional[List[ChatMessage]] = None,
         user_id: Optional[str] = None
-    ) -> str:
+    ) -> tuple[str, Optional[Dict[str, Any]]]:
         """
-        Send a message to Gemini and get a response
+        Send a message to Gemini and get a response with orchestration
         
         Args:
             user_message: The user's input message
             conversation_history: Previous messages for context
-            user_id: Optional user ID for personalization
+            user_id: Optional user ID for personalization and data fetching
             
         Returns:
-            The AI assistant's response
+            Tuple of (AI response text, campaign context dict or None)
         """
         try:
-            # Start a chat session
+            # Step 1: Use orchestrator to analyze intent and fetch relevant data
+            enriched_prompt, campaign_context = await orchestrator_service.orchestrate_response(
+                user_message=user_message,
+                user_id=user_id,
+                conversation_history=conversation_history
+            )
+            
+            # Step 2: Start a chat session
             chat_session = self.model.start_chat(history=[])
             
-            # Add conversation history if provided
+            # Step 3: Add conversation history if provided
             if conversation_history:
                 # Convert history to Gemini format
                 for msg in conversation_history:
@@ -108,10 +116,10 @@ Always aim to:
                         chat_session.send_message(msg.content)
                     # Gemini handles assistant responses automatically in history
             
-            # Send the current message
-            response = chat_session.send_message(user_message)
+            # Step 4: Send the enriched message (with campaign context if available)
+            response = chat_session.send_message(enriched_prompt)
             
-            return response.text
+            return response.text, campaign_context
             
         except Exception as e:
             print(f"Error in chat service: {str(e)}")
@@ -124,28 +132,35 @@ Always aim to:
         user_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
-        Stream responses from Gemini
+        Stream responses from Gemini with orchestration
         
         Args:
             user_message: The user's input message
             conversation_history: Previous messages for context
-            user_id: Optional user ID for personalization
+            user_id: Optional user ID for personalization and data fetching
             
         Yields:
             Chunks of the AI assistant's response
         """
         try:
-            # Start a chat session
+            # Step 1: Use orchestrator to analyze intent and fetch relevant data
+            enriched_prompt, campaign_context = await orchestrator_service.orchestrate_response(
+                user_message=user_message,
+                user_id=user_id,
+                conversation_history=conversation_history
+            )
+            
+            # Step 2: Start a chat session
             chat_session = self.model.start_chat(history=[])
             
-            # Add conversation history if provided
+            # Step 3: Add conversation history if provided
             if conversation_history:
                 for msg in conversation_history:
                     if msg.role == "user":
                         chat_session.send_message(msg.content)
             
-            # Stream the response
-            response = chat_session.send_message(user_message, stream=True)
+            # Step 4: Stream the response using enriched prompt
+            response = chat_session.send_message(enriched_prompt, stream=True)
             
             for chunk in response:
                 if chunk.text:
