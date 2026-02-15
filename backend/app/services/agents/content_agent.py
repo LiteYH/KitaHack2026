@@ -34,48 +34,48 @@ class ContentAgent:
         # System message
         self.system_message = SystemMessage(content="""You are BossolutionAI, an AI-powered marketing assistant for SMEs.
 
-Your capabilities:
-- Generate high-performing social media content using data-driven insights
-- Provide scheduling recommendations based on engagement analysis
-- Format responses professionally in Markdown
+        Your capabilities:
+        - Generate high-performing social media content using data-driven insights
+        - Provide scheduling recommendations based on engagement analysis
+        - Format responses professionally in Markdown
 
-When users request content generation, use the generate_content tool to access RAG examples and create optimized posts.""")
+        When users request content generation, use the generate_content tool to access RAG examples and create optimized posts.""")
 
 
     async def run(self, user_message: str) -> str:
         """
         Run the agent with the user's message using modern tool calling.
         """
-        # Build messages list
-        messages = [self.system_message] + self.chat_history + [HumanMessage(content=user_message)]
+        # Quick detection: if mentions content creation, force tool use
+        content_keywords = ['write', 'create', 'generate', 'post', 'caption', 'draft']
         
-        # Invoke LLM (it will decide whether to use tools)
-        response = await self.llm_with_tools.ainvoke(messages)
-        
-        # Handle tool calls if LLM decided to use them
-        if response.tool_calls:
-            # Add AI response with tool calls to messages
-            messages.append(response)
+        if any(kw in user_message.lower() for kw in content_keywords):
+            # Directly invoke tool instead of letting LLM decide
+            tool_input = {"user_input": user_message}
+            examples_context = generate_content.invoke(tool_input)
             
-            # Execute each tool call
-            for tool_call in response.tool_calls:
-                if tool_call["name"] == "generate_content":
-                    # Invoke the tool
-                    tool_result = generate_content.invoke(tool_call["args"])
-                    
-                    # Add tool result to messages
-                    messages.append(
-                        ToolMessage(
-                            content=str(tool_result),
-                            tool_call_id=tool_call["id"]
-                        )
-                    )
+            # Let LLM create final post using examples
+            messages = [
+                SystemMessage(content="You are a marketing expert. Use the examples below to create an engaging social media post."),
+                HumanMessage(content=f"{examples_context}\n\nCreate the final post now.")
+            ]
             
-            # Get final response from LLM with tool results
-            response = await self.llm_with_tools.ainvoke(messages)
+            response = await self.llm.ainvoke(messages)
+            
+            # Update chat history
+            self.chat_history.append(HumanMessage(content=user_message))
+            self.chat_history.append(AIMessage(content=response.content))
+            
+            return response.content
         
-        # Update chat history
-        self.chat_history.append(HumanMessage(content=user_message))
-        self.chat_history.append(AIMessage(content=response.content))
-        
-        return response.content
+        else:
+            # Normal conversation without tools
+            messages = [self.system_message] + self.chat_history + [HumanMessage(content=user_message)]
+            
+            response = await self.llm.ainvoke(messages)
+            
+            # Update chat history
+            self.chat_history.append(HumanMessage(content=user_message))
+            self.chat_history.append(AIMessage(content=response.content))
+            
+            return response.content
