@@ -3,82 +3,28 @@ from typing import List, Optional, AsyncGenerator
 import google.generativeai as genai
 from app.core.config import settings
 from app.schemas.chat import ChatMessage
+from dotenv import load_dotenv
+
+from app.services.agents.content_agent import ContentAgent
+
+load_dotenv()
 
 
 class ChatService:
-    """Service for handling chat interactions with Google Gemini"""
-    
+    """
+    Upgraded ChatService using a fully agentic MarketingAgent.
+
+    Features:
+    - Multi-tool reasoning: content, analytics, scheduling, competitor analysis
+    - RAG integration in content generation
+    - Markdown-formatted responses
+    - Conversation history support
+    - Optional async streaming
+    """
+
     def __init__(self):
-        """Initialize the Gemini API with API key"""
-        # Get API key from settings (which loads from .env)
-        api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY not found in environment variables. Please set it in .env file.")
-        
-        genai.configure(api_key=api_key)
-        
-        # Initialize the model - using gemini-2.0-flash-exp (latest experimental model)
-        # Note: If you want to use gemini-1.5-flash or another model, change the model_name
-        self.model = genai.GenerativeModel(
-            model_name='gemini-2.5-flash-lite',  # or 'gemini-1.5-flash' for stable version
-            system_instruction=self._get_system_instruction()
-        )
-    
-    def _get_system_instruction(self) -> str:
-        """Get the system instruction for the AI assistant"""
-        return """You are BossolutionAI, an AI-powered marketing assistant designed specifically for SMEs (Small and Medium Enterprises). 
+        self.agent = ContentAgent()
 
-Your capabilities include:
-- Content Creation: Generate engaging marketing content, social media posts, ad copy, and campaign ideas
-- Competitor Analysis: Analyze competitors' marketing strategies and provide insights
-- Campaign Optimization: Suggest improvements for marketing campaigns to maximize ROI
-- Content Scheduling: Help with content planning and scheduling strategies
-- Performance Analytics: Interpret marketing metrics and provide actionable recommendations
-- Market Research: Provide insights on target audiences, trends, and market opportunities
-
-Your personality:
-- Professional yet friendly and approachable
-- Focus on practical, actionable advice
-- Use clear language, avoiding excessive jargon
-- Be encouraging and supportive of SME growth
-- Provide specific examples and suggestions when possible
-
-IMPORTANT - Formatting Guidelines:
-- ALWAYS format your responses using Markdown for better readability
-- Use **bold text** for emphasis and important points
-- Use bullet points (- or *) or numbered lists (1., 2., 3.) to organize information
-- Break long paragraphs into shorter, digestible chunks (2-3 sentences max)
-- Use headers (##, ###) to organize different sections of your response
-- Add blank lines between sections for better spacing
-- Use line breaks to avoid wall-of-text responses
-- For lists of tips or steps, use numbered lists (1., 2., 3.)
-- For features or benefits, use bullet points (-)
-- Use > for important quotes or callouts
-- Use `code` for technical terms or specific keywords
-
-Example of good formatting:
-## Campaign Strategy
-
-Here's how I can help you:
-
-1. **Target Audience Analysis**
-   - Identify key demographics
-   - Understand customer pain points
-
-2. **Content Creation**
-   - Generate engaging posts
-   - Create platform-specific content
-
-Let me know which area you'd like to focus on!
-
-Always aim to:
-1. Understand the user's specific needs and context
-2. Provide tailored recommendations for SME budgets and resources
-3. Offer step-by-step guidance when appropriate
-4. Be concise yet comprehensive in your responses
-5. Encourage data-driven decision making
-6. FORMAT responses with proper spacing, headings, and lists for easy reading"""
-    
     async def chat(
         self,
         user_message: str,
@@ -86,37 +32,28 @@ Always aim to:
         user_id: Optional[str] = None
     ) -> str:
         """
-        Send a message to Gemini and get a response
-        
+        Handle a single chat message through the agent.
+
         Args:
-            user_message: The user's input message
-            conversation_history: Previous messages for context
+            user_message: User input
+            conversation_history: Previous messages in conversation
             user_id: Optional user ID for personalization
-            
+
         Returns:
-            The AI assistant's response
+            Formatted AI response
         """
         try:
-            # Start a chat session
-            chat_session = self.model.start_chat(history=[])
+            # Agent manages its own chat history internally
+            # No need to manually add history here
             
-            # Add conversation history if provided
-            if conversation_history:
-                # Convert history to Gemini format
-                for msg in conversation_history:
-                    if msg.role == "user":
-                        chat_session.send_message(msg.content)
-                    # Gemini handles assistant responses automatically in history
-            
-            # Send the current message
-            response = chat_session.send_message(user_message)
-            
-            return response.text
-            
+            # Run the agent
+            response = await self.agent.run(user_message)
+            return response
+
         except Exception as e:
-            print(f"Error in chat service: {str(e)}")
-            raise Exception(f"Failed to get response from AI: {str(e)}")
-    
+            print(f"Error in ChatService.chat: {str(e)}")
+            raise
+
     async def chat_stream(
         self,
         user_message: str,
@@ -124,36 +61,23 @@ Always aim to:
         user_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
-        Stream responses from Gemini
-        
+        Stream chat responses from the agent.
+
         Args:
-            user_message: The user's input message
-            conversation_history: Previous messages for context
-            user_id: Optional user ID for personalization
-            
+            user_message: User input
+            conversation_history: Previous messages in conversation
+            user_id: Optional user ID
+
         Yields:
-            Chunks of the AI assistant's response
+            Chunks of AI response as they are generated
         """
         try:
-            # Start a chat session
-            chat_session = self.model.start_chat(history=[])
-            
-            # Add conversation history if provided
-            if conversation_history:
-                for msg in conversation_history:
-                    if msg.role == "user":
-                        chat_session.send_message(msg.content)
-            
-            # Stream the response
-            response = chat_session.send_message(user_message, stream=True)
-            
-            for chunk in response:
-                if chunk.text:
-                    yield chunk.text
-                    
+            # For now, return the full response (streaming can be added later)
+            response = await self.agent.run(user_message)
+            yield response
+
         except Exception as e:
-            print(f"Error in chat stream service: {str(e)}")
-            yield f"Error: {str(e)}"
+            yield f"Error in ChatService.chat_stream: {str(e)}"
 
 
 # Singleton instance
