@@ -1,6 +1,6 @@
 ---
 name: generative_ui
-description: Generate rich, interactive UI components to visualize competitor data beautifully. USE THIS SKILL when comparing 2+ competitors (competitor_comparison), displaying metrics/KPIs/performance data (metrics card), showing trends/time-series data (trend_chart), creating feature/pricing comparison tables (feature_table), presenting strategic insights (insight card), user asks for visual/beautiful view/chart/comparison/dashboard, or data is complex and multi-dimensional. DO NOT USE for simple text responses, when no structured data exists, or for error messages. REMEMBER to always include text context before and after UI blocks.
+description: "🎨 LOAD THIS for visual/comparison requests! Complete component library with: (1) 5 UI component types (competitor_comparison, metrics, trend_chart, feature_table, insight), (2) Full JSON schemas with REQUIRED field specifications, (3) Validation rules and error prevention, (4) 20+ working examples showing proper syntax. Prevents common GenUI errors and ensures beautiful, functional visualizations. ESSENTIAL for any request asking for 'comparison', 'chart', 'visual', or 'beautiful view'."
 metadata:
   category: presentation
   priority: high

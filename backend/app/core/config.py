@@ -37,10 +37,16 @@ class Settings(BaseSettings):
     linkedin_api_token: Optional[str] = Field(default=None, description="LinkedIn API Token")
     twitter_api_key: Optional[str] = Field(default=None, description="Twitter/X API Key")
 
-    # Email / Notification Settings
-    sendgrid_api_key: Optional[str] = Field(default=None, alias="SENDGRID_API_KEY", description="SendGrid API Key for email notifications")
-    sendgrid_from_email: str = Field(default="noreply@bossolutionai.com", alias="SENDGRID_FROM_EMAIL", description="SendGrid sender email")
-    sendgrid_from_name: str = Field(default="BossolutionAI", alias="SENDGRID_FROM_NAME", description="SendGrid sender name")
+    # Email / Notification Settings - Gmail SMTP (recommended, no domain required)
+    # See EMAIL_SETUP_GUIDE.md for configuration instructions
+    SMTP_HOST: Optional[str] = Field(default=None, description="SMTP server host (e.g., smtp.gmail.com)")
+    SMTP_PORT: Optional[int] = Field(default=587, description="SMTP server port (587 for TLS, 465 for SSL)")
+    SMTP_USER: Optional[str] = Field(default=None, description="SMTP username (your email)")
+    SMTP_PASSWORD: Optional[str] = Field(default=None, description="SMTP password (Gmail app password)")
+    SMTP_FROM_EMAIL: Optional[str] = Field(default=None, description="From email address")
+    SMTP_FROM_NAME: Optional[str] = Field(default="BossolutionAI", description="From name displayed in emails")
+    SMTP_USE_TLS: Optional[bool] = Field(default=True, description="Use TLS encryption (recommended for port 587)")
+    SMTP_USE_SSL: Optional[bool] = Field(default=False, description="Use SSL encryption (for port 465)")
 
     # Uploads
     upload_dir: str = Field(default="temp_uploads", description="Directory for uploaded files")

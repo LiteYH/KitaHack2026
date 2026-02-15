@@ -207,10 +207,17 @@ class SkillMiddleware(AgentMiddleware):
         """Inject skill descriptions into system prompt (synchronous version)."""
         # Build the skills addendum
         skills_addendum = (
-            f"\n\n## Available Skills\n\n{self.skills_prompt}\n\n"
-            "Use the **load_skill** tool when you need detailed information "
-            "about handling a specific type of request or when a skill seems "
-            "relevant to the user's query."
+            f"\n\n## \ud83d\udcc2 Available Skills for Deep Expertise\n\n{self.skills_prompt}\n\n"
+            "**\u26a0\ufe0f CRITICAL: You MUST use load_skill() to access comprehensive guidance!**\n\n"
+            "Skills contain detailed workflows, templates, best practices, and examples NOT available "
+            "in your base prompt. Loading skills dramatically improves response quality.\n\n"
+            "**Load skills proactively at the START of handling requests:**\n"
+            "- Before competitor research \u2192 load 'competitor_search'\n"
+            "- After getting results \u2192 load 'competitor_analysis'\n"
+            "- Before creating visuals \u2192 load 'generative_ui'\n"
+            "- Before monitoring setup \u2192 load 'notification_management'\n\n"
+            "Example: `load_skill(skill_name=\"competitor_search\")`\n\n"
+            "Load multiple skills when needed! Don't guess - load the skill and follow its guidance."
         )
 
         # Append to system message content blocks
@@ -230,10 +237,17 @@ class SkillMiddleware(AgentMiddleware):
         """Inject skill descriptions into system prompt (asynchronous version)."""
         # Build the skills addendum
         skills_addendum = (
-            f"\n\n## Available Skills\n\n{self.skills_prompt}\n\n"
-            "Use the **load_skill** tool when you need detailed information "
-            "about handling a specific type of request or when a skill seems "
-            "relevant to the user's query."
+            f"\n\n## \ud83d\udcc2 Available Skills for Deep Expertise\n\n{self.skills_prompt}\n\n"
+            "**\u26a0\ufe0f CRITICAL: You MUST use load_skill() to access comprehensive guidance!**\n\n"
+            "Skills contain detailed workflows, templates, best practices, and examples NOT available "
+            "in your base prompt. Loading skills dramatically improves response quality.\n\n"
+            "**Load skills proactively at the START of handling requests:**\n"
+            "- Before competitor research \u2192 load 'competitor_search'\n"
+            "- After getting results \u2192 load 'competitor_analysis'\n"
+            "- Before creating visuals \u2192 load 'generative_ui'\n"
+            "- Before monitoring setup \u2192 load 'notification_management'\n\n"
+            "Example: `load_skill(skill_name=\"competitor_search\")`\n\n"
+            "Load multiple skills when needed! Don't guess - load the skill and follow its guidance."
         )
 
         # Append to system message content blocks

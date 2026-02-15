@@ -18,7 +18,6 @@ from app.core.firebase import get_db
 from app.core.auth import get_current_user_id
 from app.services.cron_service import CronService
 from app.services.monitoring_service import monitoring_service
-from app.services.notification_service import notification_service
 
 logger = logging.getLogger(__name__)
 

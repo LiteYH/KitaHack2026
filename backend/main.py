@@ -16,8 +16,9 @@ if settings.google_api_key:
     os.environ["GOOGLE_API_KEY"] = settings.google_api_key
 from app.core.firebase import initialize_firebase, get_db
 from app.api.v1 import api_router
-from app.services import CronService, monitoring_service, notification_service
+from app.services import CronService, monitoring_service
 from app.services.multi_agent_service import multi_agent_service
+from app.services.competitor_agent_service import competitor_agent_service
 
 # Suppress LangChain internal warnings that aren't actual errors
 # These are deprecation notices and package availability checks
@@ -55,7 +56,7 @@ async def lifespan(app: FastAPI):
         cron_service_instance = CronService(
             firestore_client=db,
             monitoring_service=monitoring_service,
-            notification_service=notification_service
+            competitor_agent_service=competitor_agent_service
         )
         logger.info("✅ CronService initialized")
         

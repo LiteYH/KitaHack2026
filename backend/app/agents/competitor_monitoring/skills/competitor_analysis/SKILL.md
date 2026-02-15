@@ -1,6 +1,6 @@
 ---
 name: competitor_analysis
-description: Analyze competitor research findings for strategic significance and business implications. USE THIS SKILL when you have competitor search results needing interpretation, need to determine if findings are significant/actionable, user asks for analysis/impact/what does this mean/should I be worried, comparing competitor positioning, scoring urgency or importance of competitor moves, or translating data into strategic recommendations. Provides significance scoring framework (1-10 scale), analysis dimensions (market impact, relevance, urgency, actionability), structured output format, and recommendation frameworks.
+description: "🎯 LOAD THIS after getting search results! Transforms raw data into strategic intelligence with: (1) Significance scoring framework (1-10 scale with detailed rubrics), (2) 4-dimension analysis matrix (market impact/relevance/urgency/actionability), (3) Structured recommendation templates, (4) Competitive positioning frameworks. Ensures analysis goes beyond facts to provide actionable business insights."
 metadata:
   category: analysis
   priority: high

@@ -1,6 +1,6 @@
 ---
 name: notification_management
-description: Configure continuous competitor monitoring with smart scheduling and notifications. USE THIS SKILL when user says monitor/track/watch/set up alerts/notify me, wants scheduled or recurring competitor updates (daily/weekly/continuous), after research when patterns suggest ongoing monitoring would be valuable, user asks about monitoring frequency/notification settings/alert preferences, or need to understand monitoring costs or scheduling options. Provides frequency recommendations (hourly to weekly), notification level guidance (always/significant_only/never), cost estimates, and setup workflow explanation.
+description: "🔔 LOAD THIS for monitoring configuration! Expert guidance on: (1) Frequency selection (daily vs weekly vs custom intervals), (2) Notification level optimization (all_updates vs significant_only vs critical_only), (3) Aspect selection strategy (which competitor dimensions to track), (4) Alert fatigue prevention, (5) Configuration best practices for different business contexts. Ensures monitoring setups are valuable, not spammy."
 metadata:
   category: configuration
   priority: medium

@@ -23,18 +23,20 @@ class CronService:
     Syncs with Firestore for persistence.
     """
     
-    def __init__(self, firestore_client: firestore.Client, monitoring_service=None, notification_service=None):
+    def __init__(self, firestore_client: firestore.Client, monitoring_service=None, notification_service=None, competitor_agent_service=None):
         """
-        Initialize CronService with Firestore and optionally monitoring/notification services.
+        Initialize CronService with Firestore and optionally monitoring/notification/agent services.
         
         Args:
             firestore_client: Firestore client
             monitoring_service: MonitoringService instance (can be set later)
             notification_service: NotificationService instance (can be set later)
+            competitor_agent_service: CompetitorAgentService instance (can be set later)
         """
         self.firestore = firestore_client
         self.monitoring_service = monitoring_service
         self.notification_service = notification_service
+        self.competitor_agent_service = competitor_agent_service
         self.chat_history = ChatHistoryService(firestore_client)
         
         # Configure APScheduler with in-memory jobstore
@@ -62,6 +64,10 @@ class CronService:
     def set_notification_service(self, notification_service):
         """Set the notification service (used to break circular dependencies)"""
         self.notification_service = notification_service
+    
+    def set_competitor_agent_service(self, competitor_agent_service):
+        """Set the competitor agent service (used to break circular dependencies)"""
+        self.competitor_agent_service = competitor_agent_service
     
     async def create_monitoring_job(
         self,
@@ -157,7 +163,7 @@ class CronService:
     ):
         """
         Execute monitoring task (called by APScheduler).
-        This runs the competitor monitoring agent and saves results.
+        This invokes the competitor agent with a monitoring prompt.
         
         Args:
             config_id: Configuration ID
@@ -172,14 +178,33 @@ class CronService:
         try:
             logger.info(f"Executing monitoring task for {competitor} (config: {config_id})")
             
-            if not self.monitoring_service:
-                raise RuntimeError("MonitoringService not initialized")
+            if not self.competitor_agent_service:
+                raise RuntimeError("CompetitorAgentService not initialized")
             
-            # Execute monitoring using the monitoring service
-            results = await self.monitoring_service.execute_monitoring(
-                competitor=competitor,
-                aspects=aspects,
+            # Build monitoring prompt for the agent
+            aspects_str = ", ".join(aspects) if aspects else "all aspects"
+            monitoring_prompt = (
+                f"Please monitor {competitor} for {aspects_str}. "
+                f"Search for recent updates, news, product changes, pricing updates, and any significant developments. "
+                f"Provide a comprehensive summary of your findings."
+            )
+            
+            # Create a unique thread ID for this monitoring execution
+            thread_id = f"cron_{config_id}_{result_id}"
+            
+            # Invoke the agent with the monitoring prompt
+            logger.info(f"Invoking competitor agent for monitoring: {monitoring_prompt[:100]}...")
+            agent_response = await self.competitor_agent_service.invoke(
+                message=monitoring_prompt,
+                thread_id=thread_id,
                 user_id=user_id
+            )
+            
+            # Parse agent response into structured results
+            results = self._parse_agent_response(
+                response=agent_response,
+                competitor=competitor,
+                aspects=aspects
             )
             
             # Save results to Firestore
@@ -283,6 +308,81 @@ class CronService:
                         self.scheduler.pause_job(job_id)
             except Exception as update_error:
                 logger.error(f"Failed to update error count: {update_error}")
+    
+    def _parse_agent_response(
+        self,
+        response: str,
+        competitor: str,
+        aspects: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Parse agent's text response into structured monitoring results.
+        
+        Args:
+            response: Agent's text response
+            competitor: Competitor name
+            aspects: Aspects that were monitored
+            
+        Returns:
+            Dict with findings, significance, score, and summary
+        """
+        try:
+            # The agent's response is a comprehensive text summary
+            # We'll use it as the summary and store it in findings
+            
+            # Calculate significance based on response length and keywords
+            response_lower = response.lower()
+            significance_keywords = [
+                'significant', 'important', 'major', 'critical', 'breaking',
+                'new product', 'price change', 'launched', 'announced',
+                'update', 'change', 'shift', 'expansion', 'acquisition'
+            ]
+            
+            # Count keyword matches
+            keyword_matches = sum(1 for keyword in significance_keywords if keyword in response_lower)
+            
+            # Calculate significance score (0-100)
+            # Based on response length and keyword density
+            base_score = min(30, len(response) // 50)  # Up to 30 points for length
+            keyword_score = min(70, keyword_matches * 10)  # Up to 70 points for keywords
+            significance_score = base_score + keyword_score
+            
+            # Determine if significant (threshold: 40)
+            is_significant = significance_score >= 40
+            
+            # Extract reasons (keywords found)
+            reasons = [
+                f"Found '{keyword}' in monitoring results"
+                for keyword in significance_keywords
+                if keyword in response_lower
+            ]
+            if not reasons:
+                reasons = ["Routine monitoring completed with no significant changes"]
+            
+            return {
+                'findings': {
+                    'agent_response': response,
+                    'competitor': competitor,
+                    'aspects': aspects
+                },
+                'is_significant': is_significant,
+                'significance_score': significance_score,
+                'reasons': reasons,
+                'summary': response,
+                'aspects': aspects
+            }
+            
+        except Exception as e:
+            logger.error(f"Error parsing agent response: {e}", exc_info=True)
+            # Return minimal structure on error
+            return {
+                'findings': {'agent_response': response},
+                'is_significant': False,
+                'significance_score': 0,
+                'reasons': ['Error parsing response'],
+                'summary': response if response else 'No response available',
+                'aspects': aspects
+            }
     
     def _get_job_id_from_config(self, config_id: str) -> Optional[str]:
         """Helper to get job ID from config ID"""
