@@ -205,12 +205,20 @@ export default function ROIAnalyticsPage() {
                   <h1 className="text-3xl font-bold tracking-tight">YouTube ROI Analytics</h1>
                   <p className="text-muted-foreground">Comprehensive analysis of your video performance and profitability</p>
                 </div>
-                <button
-                  onClick={fetchAnalytics}
-                  className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-                >
-                  Refresh Data
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => router.push('/youtube-report')}
+                    className="px-4 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90"
+                  >
+                    Create ROI Report
+                  </button>
+                  <button
+                    onClick={fetchAnalytics}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+                  >
+                    Refresh Data
+                  </button>
+                </div>
               </div>
 
               {/* Key Metrics Cards */}

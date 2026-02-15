@@ -22,6 +22,16 @@ def initialize_firebase():
                 print("Warning: Firebase credentials not configured. Skipping Firebase initialization.")
                 return None, None
             
+            # Check if Firebase is already initialized
+            try:
+                _app = firebase_admin.get_app()
+                _db = firestore.client()
+                print("✅ Using existing Firebase Admin SDK instance")
+                return _app, _db
+            except ValueError:
+                # App doesn't exist, initialize it
+                pass
+            
             # Initialize with service account credentials
             cred_dict = {
                 "type": "service_account",
