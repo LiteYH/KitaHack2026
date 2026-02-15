@@ -126,6 +126,45 @@ export default function ROIAnalyticsPage() {
     }
   };
 
+  const handleDownloadReport = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await fetch('http://localhost:8000/api/v1/youtube-report/download/pdf');
+
+      if (!response.ok) {
+        throw new Error('Failed to download PDF report');
+      }
+
+      // Get filename from Content-Disposition header
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = 'youtube_roi_report.pdf';
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+
+      // Download the file
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Download error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to download PDF report');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -207,14 +246,16 @@ export default function ROIAnalyticsPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => router.push('/youtube-report')}
-                    className="px-4 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90"
+                    onClick={handleDownloadReport}
+                    disabled={loading}
+                    className="px-4 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/90 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Create ROI Report
+                    {loading ? 'Downloading...' : 'Create ROI Report'}
                   </button>
                   <button
                     onClick={fetchAnalytics}
-                    className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+                    disabled={loading}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Refresh Data
                   </button>
