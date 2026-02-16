@@ -1,28 +1,50 @@
 import os
+import json
 from typing import List, Optional, AsyncGenerator, Tuple, Dict, Any
-import google.generativeai as genai
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from app.core.config import settings
 from app.schemas.chat import ChatMessage
+from app.services.roi_tool import roi_analysis_tool
 
 
 class ChatService:
-    """Service for handling chat interactions with Google Gemini"""
+    """Service for handling chat interactions with Google Gemini using LangChain"""
     
     def __init__(self):
-        """Initialize the Gemini API with API key"""
+        """Initialize the LangChain Gemini model and ROI Analysis Tool"""
         # Get API key from settings (which loads from .env)
         api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise ValueError("GOOGLE_API_KEY not found in environment variables. Please set it in .env file.")
         
-        genai.configure(api_key=api_key)
-        
-        # Initialize the model - using gemini-2.0-flash-exp (latest experimental model)
-        # Note: If you want to use gemini-1.5-flash or another model, change the model_name
-        self.model = genai.GenerativeModel(
-            model_name='gemini-2.5-flash-lite',  # or 'gemini-1.5-flash' for stable version
-            system_instruction=self._get_system_instruction()
+        # Initialize LangChain ChatGoogleGenerativeAI model
+        # Using gemini-2.5-flash-lite for fast, cost-effective responses
+        self.model = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash-lite",
+            google_api_key=api_key,
+            temperature=0.7,  # Balanced creativity and consistency
+            max_output_tokens=2048,  # Reasonable response length
+            convert_system_message_to_human=True  # Required for Gemini system messages
         )
+        
+        # Store system instruction as a reusable message
+        self.system_message = SystemMessage(content=self._get_system_instruction())
+        
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # LANGCHAIN TOOLS SETUP - Available tools for orchestrator
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        
+        # Pass AI model to ROI tool for generating insights
+        roi_analysis_tool.set_model(self.model)
+        
+        # Register available LangChain tools
+        self.tools = {
+            "roi_analysis": roi_analysis_tool
+        }
+        
+        print("✅ [ORCHESTRATOR] LangChain service initialized with ROI Analysis Tool")
+        print(f"   Available tools: {list(self.tools.keys())}")
     
     def _get_system_instruction(self) -> str:
         """Get the system instruction for the AI assistant"""
@@ -87,7 +109,8 @@ Always aim to:
         user_email: Optional[str] = None
     ) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
         """
-        Send a message to Gemini and get a response, with ROI analysis integration
+        Send a message to Gemini and get a response using LangChain Agent
+        The Agent automatically decides when to use the ROI Analysis Tool
         
         Args:
             user_message: The user's input message
@@ -99,102 +122,101 @@ Always aim to:
             Tuple of (AI assistant's response, optional chart configurations)
         """
         try:
-            # Check if this is an ROI-related query
             charts = None
-            enhanced_message = user_message
             
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # LANGCHAIN AGENT ORCHESTRATION - Automatic Tool Selection
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            
+            print(f"🎯 [ORCHESTRATOR] Processing user query with LangChain Agent")
+            print(f"   ↳ Query: {user_message}")
+            
+            # Build chat history for the agent
+            chat_history = []
+            if conversation_history:
+                for msg in conversation_history:
+                    if msg.role == "user":
+                        chat_history.append(HumanMessage(content=msg.content))
+                    elif msg.role == "assistant":
+                        chat_history.append(AIMessage(content=msg.content))
+            
+            # Prepare input for the agent
+            # If user_email is provided, include it in the context
+            if user_email:
+                agent_input = {
+                    "input": user_message,
+                    "chat_history": chat_history,
+                    "user_email": user_email  # Pass user email for ROI tool
+                }
+                print(f"   ↳ User email available: {user_email}")
+                print(f"   ↳ Agent will decide if ROI tool is needed")
+            else:
+                agent_input = {
+                    "input": user_message,
+                    "chat_history": chat_history
+                }
+                print(f"   ↳ No user email - ROI tool unavailable")
+            
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # Invoke the Agent - AI decides which tool to use (if any)
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            
+            # Check if this is an ROI query and we have user email
             if user_email:
                 from app.services.roi_analysis_service import roi_analysis_service
                 
                 if roi_analysis_service.detect_roi_query(user_message):
-                    # Step 1: Fetch ROI data from Firebase
-                    days = roi_analysis_service.extract_time_period(user_message)
-                    videos = await roi_analysis_service.fetch_user_roi_data(user_email, days)
+                    print(f"🎯 [ORCHESTRATOR] ROI query detected - invoking ROI tool directly")
                     
-                    if videos:
-                        # Step 2: Analyze the data and generate charts
-                        analysis = roi_analysis_service.analyze_roi_data(videos)
-                        charts = roi_analysis_service.generate_chart_config(analysis)
-                        
-                        # Step 3: Prepare ROI data context for Gemini
-                        summary = analysis.get("summary", {})
-                        best_video = analysis.get("best_video", {})
-                        categories = analysis.get("categories", {})
-                        
-                        # Create structured data context for Gemini to analyze
-                        period_text = f"the last {days} days" if days else "all time"
-                        
-                        roi_data_context = f"""
-The user has asked about their ROI performance. Here is their actual data from Firebase:
-
-**Time Period:** {period_text}
-
-**Overall Metrics:**
-- Total Videos: {summary.get('total_videos', 0)}
-- Total Views: {summary.get('total_views', 0):,}
-- Total Revenue: ${summary.get('total_revenue', 0):,.2f}
-- Total Cost: ${summary.get('total_cost', 0):,.2f}
-- Net Profit: ${summary.get('total_profit', 0):,.2f}
-- Overall ROI: {summary.get('overall_roi', 0):.2f}%
-
-**Revenue Breakdown:**
-- Ad Revenue: ${summary.get('ad_revenue', 0):,.2f}
-- Sponsorship Revenue: ${summary.get('sponsorship_revenue', 0):,.2f}
-- Affiliate Revenue: ${summary.get('affiliate_revenue', 0):,.2f}
-
-**Best Performing Video:**
-- Title: {best_video.get('title', 'N/A')}
-- ROI: {best_video.get('roi', 0):.2f}%
-- Revenue: ${best_video.get('revenue', 0):,.2f}
-- Views: {best_video.get('views', 0):,}
-
-**Category Performance:**
-"""
-                        for category, stats in categories.items():
-                            roi_data_context += f"- {category}: Avg ROI {stats['avg_roi']:.2f}%, {stats['count']} videos, ${stats['profit']:.2f} profit\n"
-                        
-                        roi_data_context += f"""
-**Engagement Metrics:**
-- Total Likes: {summary.get('total_likes', 0):,}
-- Total Comments: {summary.get('total_comments', 0):,}
-- Average Retention Rate: {summary.get('avg_retention', 0):.2f}%
-
-Based on this data, please analyze and answer the user's question: "{user_message}"
-
-Provide insights, recommendations, and actionable advice. Use markdown formatting with headers, bullet points, and emphasis for readability. Be specific and reference the actual numbers from their data.
-"""
-                        enhanced_message = roi_data_context
+                    # Use the ROI tool directly for better control
+                    tool_result = await roi_analysis_tool._arun(
+                        user_message=user_message,
+                        user_email=user_email
+                    )
+                    
+                    # Parse the tool result
+                    result_data = json.loads(tool_result)
+                    
+                    if result_data.get("success"):
+                        response_text = result_data.get("analysis", "")
+                        charts = result_data.get("charts", [])
+                        print(f"✅ [ORCHESTRATOR] ROI tool executed successfully")
+                        return response_text, charts
                     else:
-                        # No data found
-                        enhanced_message = f"""The user asked: "{user_message}"
-
-However, there is no ROI data found in the Firebase database for this user for the specified period. 
-
-Please inform them politely that:
-1. No ROI data was found for their account
-2. They may need to upload their video performance data first
-3. Suggest they check the ROI dashboard or contact support if they believe this is an error
-
-Keep the response friendly and helpful."""
+                        # Tool failed, fall back to general AI
+                        error_msg = result_data.get("error", "Unknown error")
+                        print(f"⚠️ [ORCHESTRATOR] ROI tool failed: {error_msg}")
+                        # Continue to general AI response below
+                else:
+                    print(f"🎯 [ORCHESTRATOR] General query - using standard AI response")
+            else:
+                print(f"🎯 [ORCHESTRATOR] No user email - using standard AI response")
             
-            # Start a chat session
-            chat_session = self.model.start_chat(history=[])
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # Fall back to standard AI response (no tools needed)
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             
-            # Add conversation history if provided
+            messages: List[BaseMessage] = [self.system_message]
+            
+            # Add conversation history
             if conversation_history:
-                # Convert history to Gemini format
                 for msg in conversation_history:
                     if msg.role == "user":
-                        chat_session.send_message(msg.content)
-                    # Gemini handles assistant responses automatically in history
+                        messages.append(HumanMessage(content=msg.content))
+                    elif msg.role == "assistant":
+                        messages.append(AIMessage(content=msg.content))
             
-            # Send the current message (with ROI context if applicable)
-            response = chat_session.send_message(enhanced_message)
+            # Add current message
+            messages.append(HumanMessage(content=user_message))
             
-            return response.text, charts
+            # Invoke the model
+            response = await self.model.ainvoke(messages)
+            print(f"✅ [ORCHESTRATOR] Standard AI response generated")
+            
+            return response.content, None
             
         except Exception as e:
-            print(f"Error in chat service: {str(e)}")
+            print(f"❌ [ORCHESTRATOR ERROR] {str(e)}")
             raise Exception(f"Failed to get response from AI: {str(e)}")
     
     async def chat_stream(
@@ -204,7 +226,7 @@ Keep the response friendly and helpful."""
         user_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
-        Stream responses from Gemini
+        Stream responses from Gemini using LangChain
         
         Args:
             user_message: The user's input message
@@ -215,21 +237,24 @@ Keep the response friendly and helpful."""
             Chunks of the AI assistant's response
         """
         try:
-            # Start a chat session
-            chat_session = self.model.start_chat(history=[])
+            # Build LangChain message history
+            messages: List[BaseMessage] = [self.system_message]
             
             # Add conversation history if provided
             if conversation_history:
                 for msg in conversation_history:
                     if msg.role == "user":
-                        chat_session.send_message(msg.content)
+                        messages.append(HumanMessage(content=msg.content))
+                    elif msg.role == "assistant":
+                        messages.append(AIMessage(content=msg.content))
             
-            # Stream the response
-            response = chat_session.send_message(user_message, stream=True)
+            # Add the current user message
+            messages.append(HumanMessage(content=user_message))
             
-            for chunk in response:
-                if chunk.text:
-                    yield chunk.text
+            # Stream the response using LangChain's async streaming
+            async for chunk in self.model.astream(messages):
+                if chunk.content:
+                    yield chunk.content
                     
         except Exception as e:
             print(f"Error in chat stream service: {str(e)}")

@@ -353,96 +353,109 @@ class ROIAnalysisService:
         
         return charts
     
-    def generate_text_summary(
+    def prepare_analysis_for_ai(
         self, 
         analysis: Dict[str, Any], 
         days: Optional[int] = None
     ) -> str:
         """
-        Generate a human-readable summary of the ROI analysis
+        Prepare structured analysis data for AI to interpret
         
         Args:
             analysis: Analysis results
             days: Number of days analyzed
             
         Returns:
-            Formatted text summary
+            Structured data string for AI analysis
         """
         if not analysis.get("found_data"):
-            return "I couldn't find any ROI data for the specified period. Please make sure you have uploaded video performance data."
+            return "No ROI data found for the specified period."
         
         summary = analysis.get("summary", {})
         best_video = analysis.get("best_video", {})
+        categories = analysis.get("categories", {})
         
         period_text = f"the last {days} days" if days else "all time"
         
-        text = f"## 📊 ROI Analysis for {period_text}\n\n"
-        text += f"### Overall Performance\n\n"
-        text += f"- **Total Videos**: {summary.get('total_videos', 0)}\n"
-        text += f"- **Total Views**: {summary.get('total_views', 0):,}\n"
-        text += f"- **Total Revenue**: ${summary.get('total_revenue', 0):,.2f}\n"
-        text += f"- **Total Cost**: ${summary.get('total_cost', 0):,.2f}\n"
-        text += f"- **Net Profit**: ${summary.get('total_profit', 0):,.2f}\n"
-        text += f"- **Overall ROI**: {summary.get('overall_roi', 0):.2f}%\n\n"
+        # Prepare structured data for AI
+        data_summary = f"""ROI Data Analysis for {period_text}:
+
+OVERALL PERFORMANCE:
+- Total Videos: {summary.get('total_videos', 0)}
+- Total Views: {summary.get('total_views', 0):,}
+- Total Revenue: ${summary.get('total_revenue', 0):,.2f}
+- Total Cost: ${summary.get('total_cost', 0):,.2f}
+- Net Profit: ${summary.get('total_profit', 0):,.2f}
+- Overall ROI: {summary.get('overall_roi', 0):.2f}%
+
+REVENUE BREAKDOWN:
+- Ad Revenue: ${summary.get('ad_revenue', 0):,.2f}
+- Sponsorship Revenue: ${summary.get('sponsorship_revenue', 0):,.2f}
+- Affiliate Revenue: ${summary.get('affiliate_revenue', 0):,.2f}
+
+ENGAGEMENT METRICS:
+- Total Likes: {summary.get('total_likes', 0):,}
+- Total Comments: {summary.get('total_comments', 0):,}
+- Average Retention Rate: {summary.get('avg_retention', 0):.2f}%
+
+BEST PERFORMING VIDEO:
+- Title: {best_video.get('title', 'Unknown')}
+- ROI: {best_video.get('roi', 0):.2f}%
+- Revenue: ${best_video.get('revenue', 0):,.2f}
+- Views: {best_video.get('views', 0):,}
+"""
         
-        # Color code the ROI
-        roi = summary.get('overall_roi', 0)
-        if roi > 100:
-            text += f"🎉 **Excellent Performance!** Your ROI is above 100%, meaning you're more than doubling your investment.\n\n"
-        elif roi > 50:
-            text += f"✅ **Good Performance!** You're seeing a healthy return on your content investment.\n\n"
-        elif roi > 0:
-            text += f"📈 **Positive ROI!** You're profitable, but there's room for improvement.\n\n"
-        else:
-            text += f"⚠️ **Needs Attention**: Your ROI is negative. Consider reviewing your content strategy and costs.\n\n"
+        # Add category performance if available
+        if categories:
+            data_summary += "\nCATEGORY PERFORMANCE:\n"
+            sorted_categories = sorted(
+                categories.items(), 
+                key=lambda x: x[1].get('avg_roi', 0), 
+                reverse=True
+            )
+            for cat, stats in sorted_categories[:5]:  # Top 5 categories
+                data_summary += f"- {cat}: Avg ROI {stats.get('avg_roi', 0):.2f}%, {stats.get('count', 0)} videos, Profit ${stats.get('profit', 0):,.2f}\n"
         
-        text += f"### Best Performing Video\n\n"
-        text += f"**{best_video.get('title', 'Unknown')}**\n"
-        text += f"- ROI: {best_video.get('roi', 0):.2f}%\n"
-        text += f"- Revenue: ${best_video.get('revenue', 0):,.2f}\n"
-        text += f"- Views: {best_video.get('views', 0):,}\n\n"
-        
-        # Add engagement insights
-        text += f"### Engagement Metrics\n\n"
-        text += f"- **Total Likes**: {summary.get('total_likes', 0):,}\n"
-        text += f"- **Total Comments**: {summary.get('total_comments', 0):,}\n"
-        text += f"- **Avg Retention Rate**: {summary.get('avg_retention', 0):.2f}%\n\n"
-        
-        text += f"📈 **Check the charts below for visual insights!**"
-        
-        return text
+        return data_summary
     
     async def process_roi_query(
         self, 
         user_message: str, 
         user_email: str
-    ) -> Tuple[str, List[Dict[str, Any]]]:
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
         """
-        Process a user's ROI query and return analysis + charts
+        Process a user's ROI query and return analysis data + charts
         
         Args:
             user_message: User's question
             user_email: User's email for data fetching
             
         Returns:
-            Tuple of (text_response, chart_configs)
+            Tuple of (analysis_dict, chart_configs)
         """
         # Extract time period
         days = self.extract_time_period(user_message)
         
-        # Fetch ROI data
+        # Fetch ROI data from Firebase
         videos = await self.fetch_user_roi_data(user_email, days)
         
         # Analyze data
         analysis = self.analyze_roi_data(videos)
         
-        # Generate text summary
-        text_summary = self.generate_text_summary(analysis, days)
+        # Prepare data for AI analysis
+        data_for_ai = self.prepare_analysis_for_ai(analysis, days)
         
         # Generate charts
         charts = self.generate_chart_config(analysis)
         
-        return text_summary, charts
+        # Return structured data with AI-ready context
+        return {
+            "found_data": analysis.get("found_data", False),
+            "data_summary": data_for_ai,
+            "user_query": user_message,
+            "period_days": days,
+            "raw_analysis": analysis
+        }, charts
 
 
 # Singleton instance
