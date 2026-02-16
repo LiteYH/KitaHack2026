@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.firebase import initialize_firebase
@@ -47,6 +48,9 @@ def health_check():
 
 # Mount API routers
 app.include_router(api_router, prefix="/api/v1")
+
+# Serve generated images statically for hackathon (local development)
+app.mount("/generated_images", StaticFiles(directory="generated_images"), name="generated_images")
 
 
 if __name__ == "__main__":
