@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional, AsyncGenerator
+from typing import List, Optional, AsyncGenerator, Tuple, Dict, Any
 import google.generativeai as genai
 from app.core.config import settings
 from app.schemas.chat import ChatMessage
@@ -83,20 +83,100 @@ Always aim to:
         self,
         user_message: str,
         conversation_history: Optional[List[ChatMessage]] = None,
-        user_id: Optional[str] = None
-    ) -> str:
+        user_id: Optional[str] = None,
+        user_email: Optional[str] = None
+    ) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
         """
-        Send a message to Gemini and get a response
+        Send a message to Gemini and get a response, with ROI analysis integration
         
         Args:
             user_message: The user's input message
             conversation_history: Previous messages for context
             user_id: Optional user ID for personalization
+            user_email: Optional user email for ROI data access
             
         Returns:
-            The AI assistant's response
+            Tuple of (AI assistant's response, optional chart configurations)
         """
         try:
+            # Check if this is an ROI-related query
+            charts = None
+            enhanced_message = user_message
+            
+            if user_email:
+                from app.services.roi_analysis_service import roi_analysis_service
+                
+                if roi_analysis_service.detect_roi_query(user_message):
+                    # Step 1: Fetch ROI data from Firebase
+                    days = roi_analysis_service.extract_time_period(user_message)
+                    videos = await roi_analysis_service.fetch_user_roi_data(user_email, days)
+                    
+                    if videos:
+                        # Step 2: Analyze the data and generate charts
+                        analysis = roi_analysis_service.analyze_roi_data(videos)
+                        charts = roi_analysis_service.generate_chart_config(analysis)
+                        
+                        # Step 3: Prepare ROI data context for Gemini
+                        summary = analysis.get("summary", {})
+                        best_video = analysis.get("best_video", {})
+                        categories = analysis.get("categories", {})
+                        
+                        # Create structured data context for Gemini to analyze
+                        period_text = f"the last {days} days" if days else "all time"
+                        
+                        roi_data_context = f"""
+The user has asked about their ROI performance. Here is their actual data from Firebase:
+
+**Time Period:** {period_text}
+
+**Overall Metrics:**
+- Total Videos: {summary.get('total_videos', 0)}
+- Total Views: {summary.get('total_views', 0):,}
+- Total Revenue: ${summary.get('total_revenue', 0):,.2f}
+- Total Cost: ${summary.get('total_cost', 0):,.2f}
+- Net Profit: ${summary.get('total_profit', 0):,.2f}
+- Overall ROI: {summary.get('overall_roi', 0):.2f}%
+
+**Revenue Breakdown:**
+- Ad Revenue: ${summary.get('ad_revenue', 0):,.2f}
+- Sponsorship Revenue: ${summary.get('sponsorship_revenue', 0):,.2f}
+- Affiliate Revenue: ${summary.get('affiliate_revenue', 0):,.2f}
+
+**Best Performing Video:**
+- Title: {best_video.get('title', 'N/A')}
+- ROI: {best_video.get('roi', 0):.2f}%
+- Revenue: ${best_video.get('revenue', 0):,.2f}
+- Views: {best_video.get('views', 0):,}
+
+**Category Performance:**
+"""
+                        for category, stats in categories.items():
+                            roi_data_context += f"- {category}: Avg ROI {stats['avg_roi']:.2f}%, {stats['count']} videos, ${stats['profit']:.2f} profit\n"
+                        
+                        roi_data_context += f"""
+**Engagement Metrics:**
+- Total Likes: {summary.get('total_likes', 0):,}
+- Total Comments: {summary.get('total_comments', 0):,}
+- Average Retention Rate: {summary.get('avg_retention', 0):.2f}%
+
+Based on this data, please analyze and answer the user's question: "{user_message}"
+
+Provide insights, recommendations, and actionable advice. Use markdown formatting with headers, bullet points, and emphasis for readability. Be specific and reference the actual numbers from their data.
+"""
+                        enhanced_message = roi_data_context
+                    else:
+                        # No data found
+                        enhanced_message = f"""The user asked: "{user_message}"
+
+However, there is no ROI data found in the Firebase database for this user for the specified period. 
+
+Please inform them politely that:
+1. No ROI data was found for their account
+2. They may need to upload their video performance data first
+3. Suggest they check the ROI dashboard or contact support if they believe this is an error
+
+Keep the response friendly and helpful."""
+            
             # Start a chat session
             chat_session = self.model.start_chat(history=[])
             
@@ -108,10 +188,10 @@ Always aim to:
                         chat_session.send_message(msg.content)
                     # Gemini handles assistant responses automatically in history
             
-            # Send the current message
-            response = chat_session.send_message(user_message)
+            # Send the current message (with ROI context if applicable)
+            response = chat_session.send_message(enhanced_message)
             
-            return response.text
+            return response.text, charts
             
         except Exception as e:
             print(f"Error in chat service: {str(e)}")

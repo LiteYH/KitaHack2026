@@ -11,15 +11,31 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface ChartConfig {
+  type: 'bar' | 'line' | 'pie' | 'area';
+  title: string;
+  data: any[];
+  xKey?: string;
+  yKey?: string;
+  yLabel?: string;
+  lines?: Array<{
+    key: string;
+    color: string;
+    label: string;
+  }>;
+}
+
 export interface ChatRequest {
   message: string;
   conversation_history?: ChatMessage[];
   user_id?: string;
+  user_email?: string;
 }
 
 export interface ChatResponse {
   message: string;
   conversation_id?: string | null;
+  charts?: ChartConfig[];
 }
 
 /**

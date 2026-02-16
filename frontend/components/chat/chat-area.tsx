@@ -5,7 +5,7 @@ import { UiGraphLogo } from "./uigraph-logo"
 import { SuggestionCards } from "./suggestion-cards"
 import { ChatInput } from "./chat-input"
 import { MessageBubble, type Message } from "./message-bubble"
-import { sendChatMessage, type ChatMessage as APIChatMessage } from "@/lib/api/chat"
+import { sendChatMessage, type ChatMessage as APIChatMessage, type ChartConfig } from "@/lib/api/chat"
 import { useAuth } from "@/contexts/AuthContext"
 
 export function ChatArea() {
@@ -31,24 +31,38 @@ export function ChatArea() {
     setIsLoading(true)
 
     try {
+      // Step 1: Retrieve user email from authentication context
+      const userEmail = user?.email
+      const userId = user?.uid
+
+      // Log for debugging (optional - remove in production)
+      if (userEmail) {
+        console.log("📧 User email retrieved:", userEmail)
+      } else {
+        console.warn("⚠️ No user email found - ROI queries may not work")
+      }
+
       // Convert messages to API format for conversation history
       const conversationHistory: APIChatMessage[] = messages.map(msg => ({
         role: msg.role as "user" | "assistant",
         content: msg.content,
       }))
 
-      // Call the API
+      // Step 2: Call the API with user email for ROI data access
+      // The backend will use this email to query Firebase ROI collection
       const response = await sendChatMessage({
         message: text,
         conversation_history: conversationHistory,
-        user_id: user?.uid,
+        user_id: userId,
+        user_email: userEmail, // Email passed to backend for Firebase query
       })
 
-      // Add assistant response
+      // Add assistant response with charts if present
       const assistantMessage: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
         content: response.message,
+        charts: response.charts,
       }
       setMessages((prev) => [...prev, assistantMessage])
     } catch (error) {

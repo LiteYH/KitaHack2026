@@ -16,18 +16,20 @@ async def send_message(request: ChatRequest):
         request: ChatRequest containing the message and optional conversation history
         
     Returns:
-        ChatResponse with the AI's response
+        ChatResponse with the AI's response and optional chart configurations
     """
     try:
-        response_text = await chat_service.chat(
+        response_text, charts = await chat_service.chat(
             user_message=request.message,
             conversation_history=request.conversation_history,
-            user_id=request.user_id
+            user_id=request.user_id,
+            user_email=request.user_email
         )
         
         return ChatResponse(
             message=response_text,
-            conversation_id=None  # Could implement conversation tracking later
+            conversation_id=None,  # Could implement conversation tracking later
+            charts=charts
         )
     
     except Exception as e:

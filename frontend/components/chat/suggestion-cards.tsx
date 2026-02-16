@@ -44,14 +44,14 @@ const suggestions: Suggestion[] = [
   },
   {
     icon: BarChart3,
-    title: "ROI Dashboard",
-    description: "Show me my ROI dashboard and campaign performance",
+    title: "ROI Overview",
+    description: "What is my ROI in the last 7 days?",
     iconColor: "text-indigo-500",
   },
   {
     icon: Eye,
-    title: "Continuous Monitoring",
-    description: "Monitor competitors and suggest response strategies",
+    title: "Performance Trends",
+    description: "Show me my revenue and profit trends over time",
     iconColor: "text-rose-500",
   },
 ]

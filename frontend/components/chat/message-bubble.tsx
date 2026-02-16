@@ -4,11 +4,13 @@ import { Bot, User } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { Components } from "react-markdown"
+import { ROIChart, type ChartConfig } from "./roi-chart"
 
 export interface Message {
   id: string
   role: "user" | "assistant"
   content: string
+  charts?: ChartConfig[]
 }
 
 interface MessageBubbleProps {
@@ -75,6 +77,15 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             >
               {message.content}
             </ReactMarkdown>
+            
+            {/* Render charts if present */}
+            {message.charts && message.charts.length > 0 && (
+              <div className="mt-4 space-y-4">
+                {message.charts.map((chart, index) => (
+                  <ROIChart key={index} config={chart} />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
