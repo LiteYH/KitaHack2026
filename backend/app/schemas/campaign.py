@@ -96,3 +96,22 @@ class CampaignAnalysisResponse(BaseModel):
     metrics: List[CampaignMetrics]
     insights: str = Field(..., description="AI-generated insights and recommendations")
     total_campaigns: int
+
+
+class CampaignUpdateRequest(BaseModel):
+    """Request model for updating campaign fields"""
+    totalBudget: Optional[int] = Field(default=None, description="Updated total budget")
+    status: Optional[Literal["ongoing", "paused"]] = Field(default=None, description="Updated campaign status")
+    amountSpent: Optional[int] = Field(default=None, description="Updated amount spent")
+    impressions: Optional[int] = Field(default=None, description="Updated impressions")
+    clicks: Optional[int] = Field(default=None, description="Updated clicks")
+    purchases: Optional[int] = Field(default=None, description="Updated purchases")
+    conversionValue: Optional[int] = Field(default=None, description="Updated conversion value")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "totalBudget": 6000,
+                "status": "paused"
+            }
+        }

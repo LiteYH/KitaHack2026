@@ -1,12 +1,28 @@
 "use client"
 
-import { Bell, LayoutGrid, ChevronDown, Clock } from "lucide-react"
+import { Bell, LayoutGrid, ChevronDown, Clock, Plus } from "lucide-react"
 import { UserProfileDropdown } from "./user-profile-dropdown"
 
 export function ChatHeader() {
+  const handleNewChat = () => {
+    if (typeof window !== 'undefined' && (window as any).__chatAreaHandleNewChat) {
+      (window as any).__chatAreaHandleNewChat()
+    }
+  }
+
   return (
     <header className="flex items-center justify-between border-b border-border bg-card px-6 py-3">
-      <h1 className="text-lg font-semibold text-foreground">BossolutionAI</h1>
+      <div className="flex items-center gap-3">
+        <h1 className="text-lg font-semibold text-foreground">BossolutionAI</h1>
+        <button
+          onClick={handleNewChat}
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          aria-label="New Chat"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          New Chat
+        </button>
+      </div>
       <div className="flex items-center gap-3">
         <button
           className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"

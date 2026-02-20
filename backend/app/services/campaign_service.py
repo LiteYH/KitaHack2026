@@ -122,6 +122,58 @@ class CampaignService:
             print(f"Error fetching campaign by ID: {str(e)}")
             return None
     
+    async def update_campaign(
+        self,
+        campaign_id: str,
+        user_id: str,
+        updates: Dict[str, Any]
+    ) -> Optional[Campaign]:
+        """
+        Update a campaign's fields in Firestore
+        
+        Args:
+            campaign_id: Campaign document ID
+            user_id: User ID for authorization
+            updates: Dictionary of fields to update
+            
+        Returns:
+            Updated Campaign object or None if failed
+        """
+        try:
+            db = get_db()
+            if db is None:
+                return None
+            
+            # First verify the campaign exists and belongs to the user
+            doc_ref = db.collection(self.collection_name).document(campaign_id)
+            doc = doc_ref.get()
+            
+            if not doc.exists:
+                return None
+            
+            data = doc.to_dict()
+            if data.get('userID') != user_id:
+                return None
+            
+            # Update only allowed fields
+            allowed_fields = ['totalBudget', 'status', 'amountSpent', 'impressions', 
+                            'clicks', 'purchases', 'conversionValue', 'endDate']
+            
+            filtered_updates = {k: v for k, v in updates.items() if k in allowed_fields}
+            
+            if not filtered_updates:
+                return await self.get_campaign_by_id(campaign_id, user_id)
+            
+            # Perform the update
+            doc_ref.update(filtered_updates)
+            
+            # Return the updated campaign
+            return await self.get_campaign_by_id(campaign_id, user_id)
+            
+        except Exception as e:
+            print(f"Error updating campaign: {str(e)}")
+            return None
+    
     def calculate_metrics(self, campaign: Campaign) -> CampaignMetrics:
         """
         Calculate performance metrics for a campaign

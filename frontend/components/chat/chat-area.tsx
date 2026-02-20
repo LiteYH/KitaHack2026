@@ -8,7 +8,12 @@ import { MessageBubble, type Message } from "./message-bubble"
 import { sendChatMessage, type ChatMessage as APIChatMessage } from "@/lib/api/chat"
 import { useAuth } from "@/contexts/AuthContext"
 
-export function ChatArea() {
+interface ChatAreaProps {
+  onWelcomeStateChange?: (isWelcome: boolean) => void
+  onNewChatRequest?: () => void
+}
+
+export function ChatArea({ onWelcomeStateChange, onNewChatRequest }: ChatAreaProps = {}) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -16,6 +21,23 @@ export function ChatArea() {
   const { user } = useAuth()
 
   const showWelcome = messages.length === 0
+
+  // Notify parent component when welcome state changes
+  useEffect(() => {
+    onWelcomeStateChange?.(showWelcome)
+  }, [showWelcome, onWelcomeStateChange])
+
+  // Handle new chat request from parent
+  useEffect(() => {
+    if (onNewChatRequest) {
+      const handleNewChat = () => {
+        setMessages([])
+        setInputValue("")
+      }
+      // Store the handler so parent can call it
+      ;(window as any).__handleNewChat = handleNewChat
+    }
+  }, [onNewChatRequest])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -69,6 +91,19 @@ export function ChatArea() {
   const handleSuggestionSelect = (text: string) => {
     handleSend(text)
   }
+
+  const handleNewChat = () => {
+    setMessages([])
+    setInputValue("")
+  }
+
+  // Expose handleNewChat to parent via ref-like pattern
+  useEffect(() => {
+    ;(window as any).__chatAreaHandleNewChat = handleNewChat
+    return () => {
+      delete (window as any).__chatAreaHandleNewChat
+    }
+  }, [])
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">

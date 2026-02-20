@@ -179,3 +179,45 @@ export async function checkCampaignServiceHealth(): Promise<{ status: string; se
     throw error;
   }
 }
+
+/**
+ * Update campaign fields (budget, status, etc.)
+ */
+export interface UpdateCampaignParams {
+  totalBudget?: number;
+  status?: 'ongoing' | 'paused';
+  amountSpent?: number;
+  impressions?: number;
+  clicks?: number;
+  purchases?: number;
+  conversionValue?: number;
+}
+
+export async function updateCampaign(
+  campaignId: string,
+  userId: string,
+  updates: UpdateCampaignParams
+): Promise<Campaign> {
+  try {
+    const response = await fetch(
+      `${API_V1_URL}/campaigns/${campaignId}?user_id=${userId}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updates),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new Error(error.detail || `HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error updating campaign:', error);
+    throw error;
+  }
+}

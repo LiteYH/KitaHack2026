@@ -5,7 +5,8 @@ from app.schemas.campaign import (
     CampaignMetrics,
     CampaignListResponse,
     CampaignAnalysisRequest,
-    CampaignAnalysisResponse
+    CampaignAnalysisResponse,
+    CampaignUpdateRequest
 )
 from app.services.campaign_service import campaign_service
 
@@ -142,4 +143,54 @@ async def health_check():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Campaign service unavailable: {str(e)}"
+        )
+
+
+@router.put("/{campaign_id}", response_model=Campaign, summary="Update a campaign")
+async def update_campaign(
+    campaign_id: str,
+    updates: CampaignUpdateRequest,
+    user_id: str = Query(..., description="User ID for authorization")
+):
+    """
+    Update a campaign's fields (budget, status, etc.)
+    
+    Args:
+        campaign_id: Campaign document ID
+        updates: Fields to update
+        user_id: User ID for authorization
+        
+    Returns:
+        Updated Campaign object
+    """
+    try:
+        # Convert Pydantic model to dict, excluding None values
+        update_dict = updates.model_dump(exclude_none=True)
+        
+        if not update_dict:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No fields to update"
+            )
+        
+        updated_campaign = await campaign_service.update_campaign(
+            campaign_id=campaign_id,
+            user_id=user_id,
+            updates=update_dict
+        )
+        
+        if not updated_campaign:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Campaign not found or access denied"
+            )
+        
+        return updated_campaign
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update campaign: {str(e)}"
         )
