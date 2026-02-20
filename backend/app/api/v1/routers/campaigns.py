@@ -6,7 +6,8 @@ from app.schemas.campaign import (
     CampaignListResponse,
     CampaignAnalysisRequest,
     CampaignAnalysisResponse,
-    CampaignUpdateRequest
+    CampaignUpdateRequest,
+    CampaignCreateRequest
 )
 from app.services.campaign_service import campaign_service
 
@@ -57,6 +58,35 @@ async def get_campaigns(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch campaigns: {str(e)}"
+        )
+
+
+@router.post("", response_model=Campaign, summary="Create a new campaign", status_code=status.HTTP_201_CREATED)
+async def create_campaign(
+    campaign: CampaignCreateRequest
+):
+    """
+    Create a new campaign
+    
+    Args:
+        campaign: Campaign data to create
+        
+    Returns:
+        Created Campaign object with auto-generated ID
+    """
+    try:
+        # Convert Pydantic model to dict
+        campaign_dict = campaign.model_dump()
+        
+        # Create the campaign
+        created_campaign = await campaign_service.create_campaign(campaign_dict)
+        
+        return created_campaign
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create campaign: {str(e)}"
         )
 
 

@@ -78,6 +78,50 @@ class CampaignService:
             print(f"Error fetching campaigns: {str(e)}")
             raise Exception(f"Failed to fetch campaigns: {str(e)}")
     
+    async def create_campaign(
+        self,
+        campaign_data: Dict[str, Any]
+    ) -> Campaign:
+        """
+        Create a new campaign in Firestore
+        
+        Args:
+            campaign_data: Dictionary containing campaign fields
+            
+        Returns:
+            Created Campaign object with auto-generated ID
+        """
+        try:
+            db = get_db()
+            if db is None:
+                raise Exception("Database connection not available")
+            
+            # Add createdAt timestamp
+            campaign_data['createdAt'] = datetime.now()
+            
+            # Create the document with auto-generated ID
+            doc_ref = db.collection(self.collection_name).document()
+            doc_ref.set(campaign_data)
+            
+            # Retrieve the created document
+            doc = doc_ref.get()
+            data = doc.to_dict()
+            data['id'] = doc.id
+            
+            # Convert timestamps
+            if 'startDate' in data and hasattr(data['startDate'], 'timestamp'):
+                data['startDate'] = datetime.fromtimestamp(data['startDate'].timestamp())
+            if 'endDate' in data and hasattr(data['endDate'], 'timestamp'):
+                data['endDate'] = datetime.fromtimestamp(data['endDate'].timestamp())
+            if 'createdAt' in data and hasattr(data['createdAt'], 'timestamp'):
+                data['createdAt'] = datetime.fromtimestamp(data['createdAt'].timestamp())
+            
+            return Campaign(**data)
+            
+        except Exception as e:
+            print(f"Error creating campaign: {str(e)}")
+            raise Exception(f"Failed to create campaign: {str(e)}")
+    
     async def get_campaign_by_id(self, campaign_id: str, user_id: str) -> Optional[Campaign]:
         """
         Fetch a specific campaign by ID

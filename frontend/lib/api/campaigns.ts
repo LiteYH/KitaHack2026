@@ -62,6 +62,21 @@ export interface GetCampaignsParams {
   limit?: number;
 }
 
+export interface CreateCampaignRequest {
+  userID: string;
+  campaignName: string;
+  totalBudget: number;
+  amountSpent?: number;
+  impressions?: number;
+  clicks?: number;
+  purchases?: number;
+  conversionValue?: number;
+  platform: string;
+  status: 'ongoing' | 'paused';
+  startDate: string; // ISO datetime string
+  endDate: string;   // ISO datetime string
+}
+
 /**
  * Fetch campaigns for a user with optional filters
  */
@@ -99,6 +114,32 @@ export async function getCampaigns(params: GetCampaignsParams): Promise<Campaign
     throw error;
   }
 }
+
+/**
+ * Create a new campaign
+ */
+export async function createCampaign(campaign: CreateCampaignRequest): Promise<Campaign> {
+  try {
+    const response = await fetch(`${API_V1_URL}/campaigns`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(campaign),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new Error(error.detail || `HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error creating campaign:', error);
+    throw error;
+  }
+}
+
 
 /**
  * Fetch a specific campaign by ID

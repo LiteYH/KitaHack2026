@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { Sidebar } from "@/components/chat/sidebar"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
-import { getCampaigns, updateCampaign, type Campaign, type CampaignMetrics } from "@/lib/api/campaigns"
+import { getCampaigns, updateCampaign, createCampaign, type Campaign, type CampaignMetrics, type CreateCampaignRequest } from "@/lib/api/campaigns"
 import { useAuth } from "@/contexts/AuthContext"
 import {
   LineChart,
@@ -37,6 +37,7 @@ import {
   Edit,
   Filter,
   Wallet,
+  Plus,
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -98,6 +99,22 @@ export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<CampaignWithMetrics[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [displayCount, setDisplayCount] = useState<string>("5")
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
+  const [newCampaign, setNewCampaign] = useState<CreateCampaignRequest>({
+    userID: '',
+    campaignName: '',
+    totalBudget: 0,
+    amountSpent: 0,
+    impressions: 0,
+    clicks: 0,
+    purchases: 0,
+    conversionValue: 0,
+    platform: 'Instagram',
+    status: 'ongoing',
+    startDate: new Date().toISOString().split('T')[0] + 'T00:00:00',
+    endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] + 'T23:59:59',
+  })
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [editingCampaign, setEditingCampaign] = useState<CampaignWithMetrics | null>(null)
   const [newBudget, setNewBudget] = useState<string>("")
@@ -126,6 +143,13 @@ export default function CampaignsPage() {
 
     fetchCampaigns()
   }, [user?.uid])
+
+  // Initialize newCampaign with user ID when available
+  useEffect(() => {
+    if (user?.uid && !newCampaign.userID) {
+      setNewCampaign(prev => ({ ...prev, userID: user.uid }))
+    }
+  }, [user?.uid, newCampaign.userID])
 
   // Calculate aggregate metrics - only from ONGOING campaigns
   const aggregateMetrics = campaigns
@@ -311,6 +335,53 @@ export default function CampaignsPage() {
     }
   }
 
+  const handleCreateCampaign = async () => {
+    if (!user?.uid) return
+
+    try {
+      setIsCreating(true)
+
+      // Ensure userID is set
+      const campaignData = {
+        ...newCampaign,
+        userID: user.uid
+      }
+
+      // Call API to create campaign
+      const createdCampaign = await createCampaign(campaignData)
+
+      // Add to local state with calculated metrics
+      const createdWithMetrics = {
+        ...createdCampaign,
+        metrics: calculateCampaignMetrics(createdCampaign)
+      }
+
+      setCampaigns([...campaigns, createdWithMetrics])
+
+      // Reset form and close dialog
+      setNewCampaign({
+        userID: user.uid,
+        campaignName: '',
+        totalBudget: 0,
+        amountSpent: 0,
+        impressions: 0,
+        clicks: 0,
+        purchases: 0,
+        conversionValue: 0,
+        platform: 'Instagram',
+        status: 'ongoing',
+        startDate: new Date().toISOString().split('T')[0] + 'T00:00:00',
+        endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] + 'T23:59:59',
+      })
+      setIsCreateDialogOpen(false)
+    } catch (error) {
+      console.error("Failed to create campaign:", error)
+      alert("Failed to create campaign. Please try again.")
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
   // Custom tooltip for better metric display
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -344,11 +415,20 @@ export default function CampaignsPage() {
           <div className="flex-1 overflow-y-auto">
             <div className="mx-auto max-w-7xl p-6">
               {/* Header */}
-              <div className="mb-6">
-                <h1 className="text-3xl font-bold text-foreground">Campaign Analytics</h1>
-                <p className="text-sm text-muted-foreground">
-                  Real-time insights from Firestore - Showing metrics for ongoing campaigns only | User ID: {user?.uid?.substring(0, 8)}...
-                </p>
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-foreground">Campaign Analytics</h1>
+                  <p className="text-sm text-muted-foreground">
+                    Real-time insights from Firestore - Showing metrics for ongoing campaigns only | User ID: {user?.uid?.substring(0, 8)}...
+                  </p>
+                </div>
+                <Button 
+                  onClick={() => setIsCreateDialogOpen(true)}
+                  className="gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Campaign
+                </Button>
               </div>
 
               {isLoading ? (
@@ -810,6 +890,198 @@ export default function CampaignsPage() {
               disabled={isUpdating || !newBudget}
             >
               {isUpdating ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Campaign Dialog */}
+      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create New Campaign</DialogTitle>
+            <DialogDescription>
+              Add a new campaign with details. All fields are required except performance metrics.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-6 py-4">
+            {/* Campaign Name - Full Width */}
+            <div className="space-y-2">
+              <Label htmlFor="campaignName">
+                Campaign Name <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="campaignName"
+                placeholder="E.g., Summer Sale 2026"
+                value={newCampaign.campaignName}
+                onChange={(e) => setNewCampaign({ ...newCampaign, campaignName: e.target.value })}
+              />
+            </div>
+
+            {/* Platform and Status - 2 Column */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="platform">
+                  Platform <span className="text-red-500">*</span>
+                </Label>
+                <Select 
+                  value={newCampaign.platform} 
+                  onValueChange={(value) => setNewCampaign({ ...newCampaign, platform: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select platform" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Instagram">Instagram</SelectItem>
+                    <SelectItem value="Facebook">Facebook</SelectItem>
+                    <SelectItem value="TikTok">TikTok</SelectItem>
+                    <SelectItem value="KOL">KOL</SelectItem>
+                    <SelectItem value="E-commerce">E-commerce</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="status">
+                  Status <span className="text-red-500">*</span>
+                </Label>
+                <Select 
+                  value={newCampaign.status} 
+                  onValueChange={(value) => setNewCampaign({ ...newCampaign, status: value as 'ongoing' | 'paused' })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ongoing">Ongoing</SelectItem>
+                    <SelectItem value="paused">Paused</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Budget - Full Width */}
+            <div className="space-y-2">
+              <Label htmlFor="totalBudget">
+                Total Budget ($) <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="totalBudget"
+                type="number"
+                min="0"
+                placeholder="10000"
+                value={newCampaign.totalBudget || ''}
+                onChange={(e) => setNewCampaign({ ...newCampaign, totalBudget: parseInt(e.target.value) || 0 })}
+              />
+            </div>
+
+            {/* Start Date and End Date - 2 Column */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="startDate">
+                  Start Date <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="startDate"
+                  type="date"
+                  value={newCampaign.startDate.split('T')[0]}
+                  onChange={(e) => setNewCampaign({ ...newCampaign, startDate: e.target.value + 'T00:00:00' })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="endDate">
+                  End Date <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="endDate"
+                  type="date"
+                  value={newCampaign.endDate.split('T')[0]}
+                  onChange={(e) => setNewCampaign({ ...newCampaign, endDate: e.target.value + 'T23:59:59' })}
+                />
+              </div>
+            </div>
+
+            {/* Performance Metrics Section */}
+            <div className="border-t pt-4">
+              <h3 className="text-sm font-semibold mb-4">Performance Metrics (Optional - defaults to 0)</h3>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="amountSpent">Amount Spent ($)</Label>
+                  <Input
+                    id="amountSpent"
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={newCampaign.amountSpent || ''}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, amountSpent: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="impressions">Impressions</Label>
+                  <Input
+                    id="impressions"
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={newCampaign.impressions || ''}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, impressions: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="clicks">Clicks</Label>
+                  <Input
+                    id="clicks"
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={newCampaign.clicks || ''}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, clicks: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="purchases">Purchases</Label>
+                  <Input
+                    id="purchases"
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={newCampaign.purchases || ''}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, purchases: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="conversionValue">Conversion Value ($)</Label>
+                  <Input
+                    id="conversionValue"
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={newCampaign.conversionValue || ''}
+                    onChange={(e) => setNewCampaign({ ...newCampaign, conversionValue: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsCreateDialogOpen(false)}
+              disabled={isCreating}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateCampaign}
+              disabled={isCreating || !newCampaign.campaignName || !newCampaign.totalBudget}
+            >
+              {isCreating ? "Creating..." : "Create Campaign"}
             </Button>
           </DialogFooter>
         </DialogContent>

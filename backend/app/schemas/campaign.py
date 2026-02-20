@@ -115,3 +115,38 @@ class CampaignUpdateRequest(BaseModel):
                 "status": "paused"
             }
         }
+
+
+class CampaignCreateRequest(BaseModel):
+    """Request model for creating a new campaign"""
+    userID: str = Field(..., description="User ID who owns the campaign")
+    campaignName: str = Field(..., min_length=1, max_length=200, description="Name of the campaign")
+    totalBudget: int = Field(..., gt=0, description="Total budget allocated")
+    amountSpent: int = Field(default=0, ge=0, description="Amount spent so far")
+    impressions: int = Field(default=0, ge=0, description="Number of impressions")
+    clicks: int = Field(default=0, ge=0, description="Number of clicks")
+    purchases: int = Field(default=0, ge=0, description="Number of purchases/conversions")
+    conversionValue: int = Field(default=0, ge=0, description="Total conversion value in currency")
+    platform: str = Field(..., description="Platform (Instagram, Facebook, KOL, E-commerce, TikTok)")
+    status: Literal["ongoing", "paused"] = Field(default="ongoing", description="Campaign status")
+    startDate: datetime = Field(..., description="Campaign start date")
+    endDate: datetime = Field(..., description="Campaign end date")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "userID": "DT4DNex2L1N2rZ9kPddEzqougK22",
+                "campaignName": "Winter Collection 2026",
+                "totalBudget": 10000,
+                "amountSpent": 0,
+                "impressions": 0,
+                "clicks": 0,
+                "purchases": 0,
+                "conversionValue": 0,
+                "platform": "Instagram",
+                "status": "ongoing",
+                "startDate": "2026-03-01T00:00:00",
+                "endDate": "2026-03-31T23:59:59"
+            }
+        }
+
