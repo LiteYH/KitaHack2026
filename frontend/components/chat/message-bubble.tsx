@@ -4,11 +4,14 @@ import { Bot, User } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { Components } from "react-markdown"
+import { CampaignAnalyticsCard } from "./campaign-analytics-card"
+import type { CampaignDataAttachment } from "@/lib/api/chat"
 
 export interface Message {
   id: string
   role: "user" | "assistant"
   content: string
+  campaignData?: CampaignDataAttachment
 }
 
 interface MessageBubbleProps {
@@ -68,14 +71,25 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         {isUser ? (
           <div className="leading-relaxed">{message.content}</div>
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={markdownComponents}
-            >
-              {message.content}
-            </ReactMarkdown>
-          </div>
+          <>
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={markdownComponents}
+              >
+                {message.content}
+              </ReactMarkdown>
+            </div>
+            {/* Render campaign analytics card if present */}
+            {message.campaignData && (
+              <CampaignAnalyticsCard
+                campaigns={message.campaignData.campaigns}
+                metrics={message.campaignData.metrics}
+                summary={message.campaignData.summary}
+                type={message.campaignData.type}
+              />
+            )}
+          </>
         )}
       </div>
     </div>

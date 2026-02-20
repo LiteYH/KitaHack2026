@@ -71,6 +71,7 @@ export function ChatArea({ onWelcomeStateChange, onNewChatRequest }: ChatAreaPro
         id: crypto.randomUUID(),
         role: "assistant",
         content: response.message,
+        campaignData: response.campaign_data || undefined,
       }
       setMessages((prev) => [...prev, assistantMessage])
     } catch (error) {

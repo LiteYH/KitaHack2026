@@ -17,9 +17,18 @@ export interface ChatRequest {
   user_id?: string;
 }
 
+export interface CampaignDataAttachment {
+  type: 'analytics' | 'edit_request';
+  campaigns: any[];
+  metrics: any[];
+  summary: any;
+  intent: any;
+}
+
 export interface ChatResponse {
   message: string;
   conversation_id?: string | null;
+  campaign_data?: CampaignDataAttachment | null;
 }
 
 /**

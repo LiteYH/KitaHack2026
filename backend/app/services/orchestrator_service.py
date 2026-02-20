@@ -48,6 +48,14 @@ class OrchestratorService:
         "E-commerce": [r"\becommerce\b", r"\be-commerce\b", r"\bonline store\b", r"\bshop\b"]
     }
     
+    # Modification keywords - indicate user wants to change campaign data
+    MODIFICATION_KEYWORDS = [
+        "change", "modify", "update", "edit", "adjust", "set",
+        "increase", "decrease", "raise", "lower", "reduce",
+        "pause", "stop", "resume", "start", "activate", "deactivate",
+        "allocate", "reallocate", "shift", "move"
+    ]
+    
     def __init__(self):
         """Initialize the orchestrator with Gemini API"""
         api_key = settings.google_api_key
@@ -120,12 +128,19 @@ class OrchestratorService:
         elif any(re.search(rf"\b{word}\b", message_lower) for word in ["compare", "comparison", "versus", "difference"]):
             intent_type = "comparison"
         
+        # Check if user wants to modify campaign data
+        wants_to_modify = (
+            needs_campaign_data and 
+            any(keyword in message_lower for keyword in self.MODIFICATION_KEYWORDS)
+        )
+        
         return {
             "needs_campaign_data": needs_campaign_data,
             "status_filter": status_filter,
             "platform_filter": platform_filter,
             "intent_type": intent_type,
-            "is_simple_query": is_simple_query
+            "is_simple_query": is_simple_query,
+            "wants_to_modify": wants_to_modify
         }
     
     async def get_relevant_campaigns(
@@ -223,8 +238,17 @@ class OrchestratorService:
         # Add specific instructions based on query type
         context_parts.append("\n# INSTRUCTIONS:")
         
+        # Check if this is a modification request
+        if intent.get("wants_to_modify", False):
+            context_parts.append(
+                "The user wants to MODIFY their campaign data (budget, status, etc.). "
+                "Explain what changes you understand they want to make, then inform them that you'll display "
+                "their campaigns in an interactive analytics view where they can make the changes. "
+                "Tell them: 'I'll show you your campaigns below so you can make these changes directly.'\n\n"
+                "Keep your response brief and focused on confirming their requested changes."
+            )
         # Check if this is a simple query
-        if intent.get("is_simple_query", False):
+        elif intent.get("is_simple_query", False):
             context_parts.append(
                 "The user is asking a simple, straightforward question. Answer DIRECTLY and CONCISELY first. "
                 "Provide the specific information requested (counts, names, etc.) in a clear, brief manner. \n\n"

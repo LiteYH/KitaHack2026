@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
-from app.schemas.chat import ChatRequest, ChatResponse
+from app.schemas.chat import ChatRequest, ChatResponse, CampaignDataAttachment
 from app.services.chat_service import chat_service
 import json
 
@@ -16,7 +16,7 @@ async def send_message(request: ChatRequest):
         request: ChatRequest containing the message and optional conversation history
         
     Returns:
-        ChatResponse with the AI's response
+        ChatResponse with the AI's response and optional campaign data
     """
     try:
         response_text, campaign_context = await chat_service.chat(
@@ -25,9 +25,25 @@ async def send_message(request: ChatRequest):
             user_id=request.user_id
         )
         
+        # Build campaign data attachment if available
+        campaign_data = None
+        if campaign_context:
+            # Determine if this is an edit request or just analytics
+            intent = campaign_context.get("intent", {})
+            data_type = "edit_request" if intent.get("wants_to_modify", False) else "analytics"
+            
+            campaign_data = CampaignDataAttachment(
+                type=data_type,
+                campaigns=campaign_context["campaigns"],
+                metrics=campaign_context["metrics"],
+                summary=campaign_context["summary"],
+                intent=intent
+            )
+        
         return ChatResponse(
             message=response_text,
-            conversation_id=None  # Could implement conversation tracking later
+            conversation_id=None,  # Could implement conversation tracking later
+            campaign_data=campaign_data
         )
     
     except Exception as e:
