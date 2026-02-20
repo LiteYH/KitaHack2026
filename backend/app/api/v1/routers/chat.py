@@ -31,13 +31,15 @@ async def send_message(request: ChatRequest):
             # Determine if this is an edit request or just analytics
             intent = campaign_context.get("intent", {})
             data_type = "edit_request" if intent.get("wants_to_modify", False) else "analytics"
+            show_visualization = intent.get("wants_visualization", False)
             
             campaign_data = CampaignDataAttachment(
                 type=data_type,
                 campaigns=campaign_context["campaigns"],
                 metrics=campaign_context["metrics"],
                 summary=campaign_context["summary"],
-                intent=intent
+                intent=intent,
+                show_visualization=show_visualization
             )
         
         return ChatResponse(

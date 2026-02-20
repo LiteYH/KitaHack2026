@@ -56,6 +56,13 @@ class OrchestratorService:
         "allocate", "reallocate", "shift", "move"
     ]
     
+    # Visualization keywords - indicate user wants to see charts/graphs
+    VISUALIZATION_KEYWORDS = [
+        "chart", "charts", "graph", "graphs", "visual", "visualization", "visualizations",
+        "visualize", "show me chart", "show me graph", "bar chart", "pie chart", "trend",
+        "trends", "analytics dashboard", "illustrative", "illustrate"
+    ]
+    
     def __init__(self):
         """Initialize the orchestrator with Gemini API"""
         api_key = settings.google_api_key
@@ -134,13 +141,20 @@ class OrchestratorService:
             any(keyword in message_lower for keyword in self.MODIFICATION_KEYWORDS)
         )
         
+        # Check if user wants visualizations
+        wants_visualization = (
+            needs_campaign_data and 
+            any(keyword in message_lower for keyword in self.VISUALIZATION_KEYWORDS)
+        )
+        
         return {
             "needs_campaign_data": needs_campaign_data,
             "status_filter": status_filter,
             "platform_filter": platform_filter,
             "intent_type": intent_type,
             "is_simple_query": is_simple_query,
-            "wants_to_modify": wants_to_modify
+            "wants_to_modify": wants_to_modify,
+            "wants_visualization": wants_visualization
         }
     
     async def get_relevant_campaigns(

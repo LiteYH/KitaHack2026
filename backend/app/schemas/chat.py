@@ -25,6 +25,7 @@ class CampaignDataAttachment(BaseModel):
     metrics: List[Dict[str, Any]]
     summary: Dict[str, Any]
     intent: Dict[str, Any]
+    show_visualization: bool = Field(default=False, description="Whether to show visualization prompt")
 
 
 class ChatResponse(BaseModel):

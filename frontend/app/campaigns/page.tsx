@@ -36,6 +36,7 @@ import {
   ArrowDownRight,
   Edit,
   Filter,
+  Wallet,
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -357,7 +358,7 @@ export default function CampaignsPage() {
               ) : (
                 <>
                   {/* Overview Cards */}
-                  <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
                     <Card>
                       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
@@ -457,15 +458,30 @@ export default function CampaignsPage() {
                         </p>
                       </CardContent>
                     </Card>
+
+                    <Card>
+                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Budget Utilization</CardTitle>
+                        <Wallet className="h-4 w-4 text-amber-500" />
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold">
+                          {((aggregateMetrics.totalSpend / (campaigns.filter(c => c.status === 'ongoing').reduce((sum, c) => sum + (c.totalBudget || 0), 0) || 1)) * 100).toFixed(1)}%
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          ${aggregateMetrics.totalSpend.toLocaleString()} / ${campaigns.filter(c => c.status === 'ongoing').reduce((sum, c) => sum + (c.totalBudget || 0), 0).toLocaleString()} utilized
+                        </p>
+                      </CardContent>
+                    </Card>
                   </div>
 
-                  {/* Charts Row */}
-                  <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-                    {/* Performance Trends - Improved with dual Y-axis */}
+                  {/* Performance Trends & Platform Distribution */}
+                  <div className="mb-6 grid gap-4 md:grid-cols-2">
+                    {/* Performance Trends */}
                     <Card>
                       <CardHeader>
                         <CardTitle>Performance Trends</CardTitle>
-                        <CardDescription>ROAS, CTR, and CVR across ongoing campaigns</CardDescription>
+                        <CardDescription>Top 5 campaigns by ROAS</CardDescription>
                       </CardHeader>
                       <CardContent>
                         <ResponsiveContainer width="100%" height={300}>
@@ -474,9 +490,9 @@ export default function CampaignsPage() {
                             <XAxis 
                               dataKey="name" 
                               className="text-xs" 
-                              angle={-15}
-                              textAnchor="end"
-                              height={60}
+                              angle={-15} 
+                              textAnchor="end" 
+                              height={80}
                             />
                             <YAxis 
                               yAxisId="left" 

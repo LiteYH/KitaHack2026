@@ -29,7 +29,8 @@ import {
   Edit, 
   Pause, 
   Play,
-  Eye
+  Eye,
+  Wallet
 } from "lucide-react"
 import { updateCampaign } from "@/lib/api/campaigns"
 import { useAuth } from "@/contexts/AuthContext"
@@ -188,7 +189,7 @@ export function CampaignAnalyticsCard({ campaigns, metrics, summary, type }: Cam
       </CardHeader>
       <CardContent className="space-y-3">
         {/* Summary Cards - Always based on ongoing campaigns */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
           <div className="bg-card rounded-lg p-3 border">
             <div className="flex items-center gap-2 mb-1">
               <DollarSign className="h-3 w-3 text-green-500" />
@@ -216,6 +217,18 @@ export function CampaignAnalyticsCard({ campaigns, metrics, summary, type }: Cam
               <span className="text-xs text-muted-foreground">Conversions (Ongoing)</span>
             </div>
             <div className="text-lg font-bold">{calculatedSummary.total_purchases?.toLocaleString() || 0}</div>
+          </div>
+          <div className="bg-card rounded-lg p-3 border">
+            <div className="flex items-center gap-2 mb-1">
+              <Wallet className="h-3 w-3 text-amber-500" />
+              <span className="text-xs text-muted-foreground">Budget (Ongoing)</span>
+            </div>
+            <div className="text-lg font-bold">
+              {((calculatedSummary.total_spent / (ongoingCampaigns.reduce((sum, c) => sum + (c.totalBudget || 0), 0) || 1)) * 100).toFixed(1)}%
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              ${calculatedSummary.total_spent?.toLocaleString() || 0} / ${ongoingCampaigns.reduce((sum, c) => sum + (c.totalBudget || 0), 0).toLocaleString()}
+            </div>
           </div>
         </div>
 

@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { Components } from "react-markdown"
 import { CampaignAnalyticsCard } from "./campaign-analytics-card"
+import { CampaignVisualization } from "./campaign-visualization"
 import type { CampaignDataAttachment } from "@/lib/api/chat"
 
 export interface Message {
@@ -82,12 +83,22 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             </div>
             {/* Render campaign analytics card if present */}
             {message.campaignData && (
-              <CampaignAnalyticsCard
-                campaigns={message.campaignData.campaigns}
-                metrics={message.campaignData.metrics}
-                summary={message.campaignData.summary}
-                type={message.campaignData.type}
-              />
+              <>
+                <CampaignAnalyticsCard
+                  campaigns={message.campaignData.campaigns}
+                  metrics={message.campaignData.metrics}
+                  summary={message.campaignData.summary}
+                  type={message.campaignData.type}
+                />
+                {/* Render visualization prompt if requested */}
+                {message.campaignData.show_visualization && (
+                  <div className="mt-3">
+                    <CampaignVisualization 
+                      campaigns={message.campaignData.campaigns}
+                    />
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

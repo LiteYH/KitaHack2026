@@ -23,6 +23,7 @@ export interface CampaignDataAttachment {
   metrics: any[];
   summary: any;
   intent: any;
+  show_visualization?: boolean;
 }
 
 export interface ChatResponse {
