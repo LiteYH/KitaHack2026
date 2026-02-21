@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from app.schemas.chat import ChatRequest, ChatResponse
-from app.services.chat_service import chat_service
+from app.services.agent_service import agent_service  # New LangGraph agent with HITL
+from app.services.chat_service import chat_service  # Legacy service (fallback)
 import json
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -11,28 +12,52 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 async def send_message(request: ChatRequest):
     """
     Send a message to the AI assistant and get a response
+    Uses LangGraph agent with Human-in-the-Loop (HITL) approval for tool execution
     
     Args:
         request: ChatRequest containing the message and optional conversation history
         
     Returns:
-        ChatResponse with the AI's response and optional chart configurations
+        ChatResponse with the AI's response, optional chart configurations, and optional approval request
     """
     try:
-        response_text, charts = await chat_service.chat(
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # Use LangGraph Agent Service (with native HITL middleware)
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        
+        # Prepare approval decision if provided
+        approval_decision = None
+        if request.approval_decision:
+            approval_decision = {
+                "thread_id": request.approval_decision.thread_id,
+                "approved": request.approval_decision.approved,
+                "tool_name": request.approval_decision.tool_name
+            }
+        
+        # Call agent service
+        response_text, charts, requires_approval, approval_request, thread_id = await agent_service.chat(
             user_message=request.message,
             conversation_history=request.conversation_history,
             user_id=request.user_id,
-            user_email=request.user_email
+            user_email=request.user_email,
+            thread_id=request.thread_id,
+            approval_decision=approval_decision
         )
         
         return ChatResponse(
             message=response_text,
-            conversation_id=None,  # Could implement conversation tracking later
-            charts=charts
+            conversation_id=None,
+            charts=charts,
+            requires_confirmation=False,  # Legacy field
+            confirmation_request=None,  # Legacy field
+            requires_approval=requires_approval,
+            approval_request=approval_request,
+            thread_id=thread_id
         )
     
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process chat message: {str(e)}"

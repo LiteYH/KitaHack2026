@@ -5,13 +5,17 @@ import { UiGraphLogo } from "./uigraph-logo"
 import { SuggestionCards } from "./suggestion-cards"
 import { ChatInput } from "./chat-input"
 import { MessageBubble, type Message } from "./message-bubble"
-import { sendChatMessage, type ChatMessage as APIChatMessage, type ChartConfig } from "@/lib/api/chat"
+import { sendChatMessage, type ChatMessage as APIChatMessage, type ChartConfig, type ApprovalRequest } from "@/lib/api/chat"
 import { useAuth } from "@/contexts/AuthContext"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
 
 export function ChatArea() {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null)
+  const [threadId, setThreadId] = useState<string | undefined>(undefined)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { user } = useAuth()
 
@@ -19,27 +23,55 @@ export function ChatArea() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+  }, [messages, pendingApproval])
 
-  const handleSend = async (text: string) => {
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: text,
+  const handleSend = async (text: string, approvalDecision?: { approved: boolean; thread_id: string }) => {
+    // Don't add user message if this is an approval decision
+    if (!approvalDecision) {
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: text,
+      }
+      setMessages((prev) => [...prev, userMessage])
     }
-    setMessages((prev) => [...prev, userMessage])
+    
     setIsLoading(true)
 
     try {
-      // Step 1: Retrieve user email from authentication context
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // AUTHENTICATED USER EMAIL RETRIEVAL FOR ROI DATA ACCESS
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // 
+      // When users ask ROI-related questions, the backend needs their Gmail to:
+      // 1. Query Firebase ROI collection (filtered by user_email field)
+      // 2. Ensure data privacy (user only sees their own data)
+      // 3. Provide personalized analytics and insights
+      //
+      // Flow:
+      // 1. User is authenticated via Firebase Auth (AuthContext)
+      // 2. Get user's email from auth context (user?.email)
+      // 3. Pass email to backend in chat request
+      // 4. Backend triggers LangGraph agent with user email in context
+      // 5. If AI detects ROI query → LangGraph HITL requests approval
+      // 6. User approves → Backend queries Firebase with user_email filter
+      // 7. ROI data is analyzed and returned with charts
+      //
+      // Security:
+      // - User must be authenticated to have email
+      // - Firebase rules enforce user_email filtering
+      // - No cross-user data access possible
+      // - Approval dialog explains data access before execution
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      
       const userEmail = user?.email
       const userId = user?.uid
 
-      // Log for debugging (optional - remove in production)
+      // Log for debugging (remove in production for privacy)
       if (userEmail) {
-        console.log("📧 User email retrieved:", userEmail)
+        console.log("📧 [AUTH] User Gmail retrieved for ROI queries:", userEmail)
       } else {
-        console.warn("⚠️ No user email found - ROI queries may not work")
+        console.warn("⚠️ [AUTH] No user email found - ROI queries will require login")
       }
 
       // Convert messages to API format for conversation history
@@ -48,25 +80,65 @@ export function ChatArea() {
         content: msg.content,
       }))
 
-      // Step 2: Call the API with user email for ROI data access
-      // The backend will use this email to query Firebase ROI collection
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // SEND REQUEST TO BACKEND WITH USER EMAIL
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // The backend will:
+      // - Include user_email in LangGraph agent context
+      // - AI automatically detects ROI queries
+      // - LangGraph HITL pauses and requests approval for ROI data access
+      // - If approved: Queries Firebase: WHERE user_email == userEmail
+      // - Returns analysis with charts
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      
       const response = await sendChatMessage({
-        message: text,
+        message: approvalDecision ? "" : text,
         conversation_history: conversationHistory,
         user_id: userId,
-        user_email: userEmail, // Email passed to backend for Firebase query
+        user_email: userEmail, // 🔑 Key: Pass Gmail to backend for Firebase ROI query
+        thread_id: threadId,
+        approval_decision: approvalDecision ? {
+          thread_id: approvalDecision.thread_id,
+          approved: approvalDecision.approved,
+          tool_name: pendingApproval?.tool_name
+        } : undefined
       })
 
-      // Add assistant response with charts if present
-      const assistantMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: response.message,
-        charts: response.charts,
+      // Store thread_id for subsequent requests
+      if (response.thread_id) {
+        setThreadId(response.thread_id)
       }
-      setMessages((prev) => [...prev, assistantMessage])
+
+      // Check if approval is required
+      if (response.requires_approval && response.approval_request) {
+        // Show approval request UI
+        setPendingApproval(response.approval_request)
+        
+        // Add the approval request message to the chat
+        const approvalMessage: Message = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: response.message,
+        }
+        setMessages((prev) => [...prev, approvalMessage])
+      } else {
+        // Clear any pending approval
+        setPendingApproval(null)
+        
+        // Add assistant response with charts if present
+        const assistantMessage: Message = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: response.message,
+          charts: response.charts,
+        }
+        setMessages((prev) => [...prev, assistantMessage])
+      }
     } catch (error) {
       console.error("Error sending message:", error)
+      
+      // Clear pending approval on error
+      setPendingApproval(null)
       
       // Show error message to user
       const errorMessage: Message = {
@@ -78,6 +150,27 @@ export function ChatArea() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const handleApprovalDecision = async (approved: boolean) => {
+    if (!pendingApproval) return
+
+    // Add a visual confirmation of the user's choice
+    const decisionMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: approved ? "Yes" : "No",
+    }
+    setMessages((prev) => [...prev, decisionMessage])
+
+    // Send the approval decision
+    await handleSend("", {
+      approved,
+      thread_id: pendingApproval.thread_id
+    })
+
+    // Clear pending approval
+    setPendingApproval(null)
   }
 
   const handleSuggestionSelect = (text: string) => {
@@ -103,7 +196,7 @@ export function ChatArea() {
             {messages.map((msg) => (
               <MessageBubble key={msg.id} message={msg} />
             ))}
-            {isLoading && (
+            {isLoading && !pendingApproval && (
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
                   <div className="h-4 w-4 animate-pulse rounded-full bg-primary" />
@@ -114,6 +207,33 @@ export function ChatArea() {
                 </div>
               </div>
             )}
+            
+            {/* Approval Request UI */}
+            {pendingApproval && (
+              <Card className="p-4 border-2 border-primary/20 bg-primary/5">
+                <div className="flex flex-col gap-3">
+                  <p className="text-sm font-medium">Do you approve this data access?</p>
+                  <div className="flex gap-3">
+                    <Button
+                      onClick={() => handleApprovalDecision(true)}
+                      disabled={isLoading}
+                      className="flex-1"
+                    >
+                      Yes
+                    </Button>
+                    <Button
+                      onClick={() => handleApprovalDecision(false)}
+                      disabled={isLoading}
+                      variant="outline"
+                      className="flex-1"
+                    >
+                      No
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            )}
+            
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -130,7 +250,7 @@ export function ChatArea() {
           value={inputValue}
           onChange={setInputValue}
           onSend={handleSend}
-          disabled={isLoading}
+          disabled={isLoading || !!pendingApproval}
         />
       </div>
     </div>

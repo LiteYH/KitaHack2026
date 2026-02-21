@@ -106,23 +106,100 @@ Always aim to:
         user_message: str,
         conversation_history: Optional[List[ChatMessage]] = None,
         user_id: Optional[str] = None,
-        user_email: Optional[str] = None
-    ) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
+        user_email: Optional[str] = None,
+        confirmation_response: Optional[Dict[str, Any]] = None
+    ) -> Tuple[str, Optional[List[Dict[str, Any]]], bool, Optional[Dict[str, Any]]]:
         """
         Send a message to Gemini and get a response using LangChain Agent
-        The Agent automatically decides when to use the ROI Analysis Tool
+        Supports Human-in-the-Loop (HITL) confirmation for sensitive data access
         
         Args:
             user_message: The user's input message
             conversation_history: Previous messages for context
             user_id: Optional user ID for personalization
             user_email: Optional user email for ROI data access
+            confirmation_response: User's response to a pending confirmation request
             
         Returns:
-            Tuple of (AI assistant's response, optional chart configurations)
+            Tuple of (response_text, charts, requires_confirmation, confirmation_request)
         """
         try:
             charts = None
+            requires_confirmation = False
+            confirmation_request = None
+            
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # HITL: Handle confirmation response (user confirmed/denied)
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            
+            if confirmation_response:
+                action_id = confirmation_response.get("action_id")
+                confirmed = confirmation_response.get("confirmed", False)
+                
+                print(f"🔐 [HITL] Processing confirmation response: action_id={action_id}, confirmed={confirmed}")
+                
+                if not confirmed:
+                    # User denied the request
+                    print(f"❌ [HITL] User denied data access request")
+                    return (
+                        "I understand. I won't access your ROI data. Feel free to ask me anything else about marketing strategies, content creation, or general business advice! 😊",
+                        None,
+                        False,
+                        None
+                    )
+                
+                # User confirmed - process the ROI query
+                print(f"✅ [HITL] User confirmed - processing ROI analysis")
+                
+                from app.services.roi_analysis_service import roi_analysis_service
+                
+                # Process the confirmed action
+                analysis_data, charts = await roi_analysis_service.process_confirmed_roi_query(action_id)
+                
+                if not analysis_data.get("found_data"):
+                    error_msg = analysis_data.get("error", "No ROI data found")
+                    return (
+                        f"⚠️ {error_msg}\n\nPlease make sure you have uploaded video performance data to get insights.",
+                        None,
+                        False,
+                        None
+                    )
+                
+                # Generate AI insights from the data
+                system_prompt = """You are a data analyst expert specializing in YouTube content ROI analysis.
+Your task is to analyze the provided ROI data and generate insightful, actionable recommendations.
+
+Guidelines:
+- Provide a clear, conversational summary of the key findings
+- Highlight strengths and areas for improvement
+- Use emojis appropriately (📊, 💰, 🎯, ✅, ⚠️, 📈)
+- Focus on actionable insights
+- Keep the tone professional but friendly
+- Structure your response with markdown formatting
+- Reference specific numbers to support your analysis"""
+
+                user_prompt = f"""User Question: {analysis_data.get('user_query', user_message)}
+
+{analysis_data.get('data_summary', '')}
+
+Please provide an insightful analysis of this ROI data, directly addressing the user's question. Include:
+1. A brief overview of overall performance
+2. Key insights and patterns
+3. Actionable recommendations
+4. Mention that visualizations are provided below"""
+
+                ai_messages = [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_prompt)
+                ]
+                
+                # Invoke AI model
+                ai_response = await self.model.ainvoke(ai_messages)
+                response_text = ai_response.content
+                
+                print(f"✅ [HITL] Analysis complete with {len(charts)} charts")
+                
+                return response_text, charts, False, None
             
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             # LANGCHAIN AGENT ORCHESTRATION - Automatic Tool Selection
@@ -131,62 +208,29 @@ Always aim to:
             print(f"🎯 [ORCHESTRATOR] Processing user query with LangChain Agent")
             print(f"   ↳ Query: {user_message}")
             
-            # Build chat history for the agent
-            chat_history = []
-            if conversation_history:
-                for msg in conversation_history:
-                    if msg.role == "user":
-                        chat_history.append(HumanMessage(content=msg.content))
-                    elif msg.role == "assistant":
-                        chat_history.append(AIMessage(content=msg.content))
-            
-            # Prepare input for the agent
-            # If user_email is provided, include it in the context
-            if user_email:
-                agent_input = {
-                    "input": user_message,
-                    "chat_history": chat_history,
-                    "user_email": user_email  # Pass user email for ROI tool
-                }
-                print(f"   ↳ User email available: {user_email}")
-                print(f"   ↳ Agent will decide if ROI tool is needed")
-            else:
-                agent_input = {
-                    "input": user_message,
-                    "chat_history": chat_history
-                }
-                print(f"   ↳ No user email - ROI tool unavailable")
-            
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # Invoke the Agent - AI decides which tool to use (if any)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            
             # Check if this is an ROI query and we have user email
             if user_email:
                 from app.services.roi_analysis_service import roi_analysis_service
                 
                 if roi_analysis_service.detect_roi_query(user_message):
-                    print(f"🎯 [ORCHESTRATOR] ROI query detected - invoking ROI tool directly")
+                    print(f"🔒 [ORCHESTRATOR] ROI query detected - initiating HITL confirmation")
                     
-                    # Use the ROI tool directly for better control
-                    tool_result = await roi_analysis_tool._arun(
+                    # Request confirmation before accessing data
+                    analysis_data, charts, confirmation_req = await roi_analysis_service.process_roi_query(
                         user_message=user_message,
-                        user_email=user_email
+                        user_email=user_email,
+                        skip_confirmation=False  # Require confirmation
                     )
                     
-                    # Parse the tool result
-                    result_data = json.loads(tool_result)
-                    
-                    if result_data.get("success"):
-                        response_text = result_data.get("analysis", "")
-                        charts = result_data.get("charts", [])
-                        print(f"✅ [ORCHESTRATOR] ROI tool executed successfully")
-                        return response_text, charts
-                    else:
-                        # Tool failed, fall back to general AI
-                        error_msg = result_data.get("error", "Unknown error")
-                        print(f"⚠️ [ORCHESTRATOR] ROI tool failed: {error_msg}")
-                        # Continue to general AI response below
+                    if confirmation_req:
+                        # Need user confirmation
+                        print(f"⏸️ [ORCHESTRATOR] Waiting for user confirmation")
+                        return (
+                            confirmation_req["message"],
+                            None,
+                            True,
+                            confirmation_req
+                        )
                 else:
                     print(f"🎯 [ORCHESTRATOR] General query - using standard AI response")
             else:
@@ -213,7 +257,7 @@ Always aim to:
             response = await self.model.ainvoke(messages)
             print(f"✅ [ORCHESTRATOR] Standard AI response generated")
             
-            return response.content, None
+            return response.content, None, False, None
             
         except Exception as e:
             print(f"❌ [ORCHESTRATOR ERROR] {str(e)}")

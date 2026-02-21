@@ -25,17 +25,36 @@ export interface ChartConfig {
   }>;
 }
 
+export interface ApprovalDecision {
+  thread_id: string;
+  approved: boolean;
+  tool_name?: string;
+}
+
+export interface ApprovalRequest {
+  tool_name: string;
+  tool_args: any;
+  message: string;
+  thread_id: string;
+  requires_approval: boolean;
+}
+
 export interface ChatRequest {
   message: string;
   conversation_history?: ChatMessage[];
   user_id?: string;
   user_email?: string;
+  thread_id?: string;
+  approval_decision?: ApprovalDecision;
 }
 
 export interface ChatResponse {
   message: string;
   conversation_id?: string | null;
   charts?: ChartConfig[];
+  requires_approval?: boolean;
+  approval_request?: ApprovalRequest;
+  thread_id?: string;
 }
 
 /**

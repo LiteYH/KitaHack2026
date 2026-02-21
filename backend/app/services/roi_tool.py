@@ -14,38 +14,91 @@ import json
 class ROIAnalysisInput(BaseModel):
     """Input schema for ROI Analysis Tool"""
     user_message: str = Field(description="The user's question about ROI, revenue, performance, or video metrics")
-    user_email: str = Field(description="The user's email address to fetch their ROI data from Firebase")
+    user_email: str = Field(
+        default="",
+        description="The user's email address to fetch their ROI data from Firebase. If not provided, will attempt to retrieve from runtime config."
+    )
 
 
 class ROIAnalysisTool(BaseTool):
     """
-    LangChain Tool for ROI Analysis
+    LangChain Tool for ROI Analysis with LangGraph Human-in-the-Loop (HITL)
     
-    This tool:
-    1. Fetches user ROI data from Firebase
-    2. Analyzes the metrics
-    3. Passes data to AI for intelligent insights
-    4. Generates charts with fixed types
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    AUTOMATIC USER APPROVAL FLOW (Human-in-the-Loop)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    This tool implements a Human-in-the-Loop pattern:
+    1. 🤖 AI detects ROI-related queries automatically
+    2. ⏸️ LangGraph pauses execution and requests user approval
+    3. 💬 User sees approval dialog with detailed information
+    4. ✅/❌ User approves or denies data access
+    5. 🚀 If approved: Tool executes, retrieves user's ROI data from Firebase
+    6. 📈 AI analyzes data and generates insights with charts
+    
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    DATA ACCESS & SECURITY
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    - Fetches user ROI data from Firebase ROI collection
+    - Filters by user's Gmail address (user_email field)
+    - Analyzes video performance metrics
+    - Generates AI-powered insights
+    - Returns chart configurations for data visualization
+    
+    Security: LangGraph HITL middleware intercepts tool calls BEFORE execution,
+    ensuring user consent before accessing sensitive Firebase data.
     """
     
     name: str = "roi_analysis"
-    description: str = """Use this tool when the user asks about:
-    - ROI (Return on Investment)
-    - Revenue, profit, or earnings
-    - Video performance or metrics
-    - Views, engagement, or analytics
-    - Cost analysis or budget
-    - Time-based questions (e.g., "last 7 days", "this month")
-    
-    Input should be the user's question and their email address.
-    The tool will fetch their ROI data, analyze it, and return insights with chart configurations.
-    
-    Example questions:
-    - "What is my ROI for the last 7 days?"
-    - "Show me my revenue breakdown"
-    - "Which video performed best?"
-    - "How much profit did I make last month?"
-    """
+    description: str = """🎯 USE THIS TOOL when the user asks about:
+
+**Financial Metrics:**
+- ROI (Return on Investment)
+- Revenue, profit, earnings, income
+- Costs, expenses, budget analysis
+- Profit margins or net gains
+
+**Video Performance:**
+- Video metrics (views, likes, comments, shares)
+- Engagement rates or audience interaction
+- Retention rates or watch time
+- Video performance comparisons
+
+**Analytics & Insights:**
+- Performance analytics or data insights
+- Marketing campaign effectiveness
+- Content performance analysis
+- Trend analysis over time
+
+**Time-Based Queries:**
+- "Last X days" or "past X days"
+- "This week" or "last week"
+- "This month" or "last month"
+- Date range analysis
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Example Questions:**
+- "What is my ROI for the last 7 days?"
+- "Show me my revenue breakdown"
+- "Which video performed best this month?"
+- "How much profit did I make last month?"
+- "What are my top performing videos?"
+- "Analyze my video engagement trends"
+- "Compare my costs vs revenue"
+
+**Input Requirements:**
+- user_message: The user's question (string)
+- user_email: User's Gmail address (MUST be provided - used to query Firebase)
+
+**Output:**
+JSON with AI analysis and chart configurations for visualization.
+
+**Security Note:**
+This tool is protected by LangGraph's Human-in-the-Loop middleware.
+User approval is AUTOMATICALLY requested before execution.
+Data is filtered by user_email to ensure privacy."""
     
     args_schema: Type[BaseModel] = ROIAnalysisInput
     return_direct: bool = True  # Return result directly without further processing
@@ -60,15 +113,19 @@ class ROIAnalysisTool(BaseTool):
     async def _arun(
         self,
         user_message: str,
-        user_email: str,
+        user_email: str = "",
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None
     ) -> str:
         """
         Execute ROI analysis asynchronously
         
+        Note: With LangGraph HITL middleware, this tool is only called AFTER user approval.
+        The agent interrupts BEFORE calling this tool, requests user approval, and only
+        proceeds to execute this method if the user approves.
+        
         Args:
             user_message: User's question about ROI
-            user_email: User's email for data fetching
+            user_email: User's email for data fetching (can be empty, will try to get from config)
             run_manager: Callback manager for async execution
             
         Returns:
@@ -77,14 +134,86 @@ class ROIAnalysisTool(BaseTool):
         try:
             from app.services.roi_analysis_service import roi_analysis_service
             
-            print(f"🎯 [ROI TOOL] Executing ROI analysis for: {user_email}")
-            print(f"   ↳ Query: {user_message}")
+            # Try to get user_email from runtime config if not provided or empty
+            if not user_email and run_manager:
+                try:
+                    # LangGraph passes config through run_manager
+                    if hasattr(run_manager, 'get_config'):
+                        config = run_manager.get_config()
+                    elif hasattr(run_manager, 'metadata'):
+                        config = run_manager.metadata
+                    elif hasattr(run_manager, 'tags') and run_manager.tags:
+                        # Sometimes config is in tags
+                        for tag in run_manager.tags:
+                            if isinstance(tag, dict) and 'user_email' in tag:
+                                user_email = tag['user_email']
+                                break
+                    else:
+                        config = {}
+                    
+                    if not user_email and isinstance(config, dict):
+                        user_email = config.get('configurable', {}).get('user_email', '')
+                    
+                    if user_email:
+                        print(f"   📧 Retrieved user_email from runtime config: {user_email}")
+                except Exception as e:
+                    print(f"   ⚠️  Could not retrieve user_email from runtime config: {e}")
             
-            # Step 1: Fetch and analyze ROI data from Firebase
-            analysis_data, charts = await roi_analysis_service.process_roi_query(
+            print(f"\n🎯 [ROI TOOL] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            print(f"🚀 [ROI TOOL] Executing ROI Analysis (Post-Approval)")
+            print(f"   ✓ User email (from args): '{user_email}'")
+            print(f"   ✓ User email (length): {len(user_email) if user_email else 0}")
+            print(f"   ✓ User email (repr): {repr(user_email)}")
+            print(f"   ✓ Query: {user_message}")
+            print(f"   ✓ Approval: GRANTED via LangGraph HITL")
+            print(f"   ✓ Data source: Firebase ROI Collection")
+            if user_email:
+                print(f"   ✓ Filter: user_email == '{user_email}'")
+            print(f"🎯 [ROI TOOL] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+            
+            # Validate user_email is present
+            if not user_email or user_email.strip() == "":
+                print(f"   ❌ ERROR: No user_email provided in tool args or config!")
+                print(f"   ↳ user_email value: {repr(user_email)}")
+                print(f"   ↳ run_manager: {run_manager}")
+                print(f"   ↳ run_manager type: {type(run_manager)}")
+                if run_manager:
+                    print(f"   ↳ run_manager.__dict__: {run_manager.__dict__ if hasattr(run_manager, '__dict__') else 'N/A'}")
+                return json.dumps({
+                    "success": False,
+                    "error": "User email is required to access ROI data. Please ensure you're logged in.",
+                    "analysis": "⚠️ **Authentication Required**\n\nI need your Gmail address to access your ROI data from Firebase. Please make sure you're logged in with your account.\n\n**Why is this needed?**\n- Your ROI data is stored in Firebase\n- Data is filtered by Gmail address for privacy\n- Only you can access your own data\n\n**Next Steps:**\n1. Log in to your account\n2. Try your question again",
+                    "tool_used": "roi_analysis"
+                }, indent=2)
+            
+            # Call the ROI analysis service to:
+            # 1. Fetch user's ROI data from Firebase (filtered by user_email)
+            # 2. Analyze the data based on the user's question
+            # 3. Generate insights and chart configurations
+            # Note: Skip custom confirmation since LangGraph HITL already handled approval
+            print(f"   📞 Calling roi_analysis_service.process_roi_query()...")
+            print(f"      user_message: {user_message}")
+            print(f"      user_email: '{user_email}'")
+            print(f"      skip_confirmation: True")
+            
+            analysis_data, charts, _ = await roi_analysis_service.process_roi_query(
                 user_message=user_message,
-                user_email=user_email
+                user_email=user_email,
+                skip_confirmation=True  # LangGraph already handled approval
             )
+            
+            print(f"\n   📥 Received response from process_roi_query()")
+            print(f"      analysis_data keys: {list(analysis_data.keys())}")
+            print(f"      found_data: {analysis_data.get('found_data')}")
+            print(f"      charts count: {len(charts) if charts else 0}")
+            if 'debug_info' in analysis_data:
+                print(f"      debug_info: {analysis_data['debug_info']}")
+            
+            print(f"✅ [ROI TOOL] Analysis completed successfully")
+            print(f"   ↳ Charts generated: {len(charts) if charts else 0}")
+            print(f"   ↳ Data retrieved from Firebase for user: {user_email}")
+            print(f"🎯 [ROI TOOL] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
             
             if not analysis_data.get("found_data"):
                 print(f"   ↳ No data found")
@@ -95,7 +224,7 @@ class ROIAnalysisTool(BaseTool):
                     "tool_used": "roi_analysis"
                 }, indent=2)
             
-            # Step 2: Pass data to AI for intelligent analysis
+            # Pass data to AI for intelligent analysis
             print(f"   ↳ Passing data to AI for analysis...")
             
             system_prompt = """You are a data analyst expert specializing in YouTube content ROI analysis.
@@ -112,7 +241,7 @@ Guidelines:
 
             user_prompt = f"""User Question: {user_message}
 
-{analysis_data['data_summary']}
+{analysis_data.get('data_summary', '')}
 
 Please provide an insightful analysis of this ROI data, directly addressing the user's question. Include:
 1. A brief overview of overall performance
@@ -131,7 +260,7 @@ Please provide an insightful analysis of this ROI data, directly addressing the 
                 ai_analysis = ai_response.content
             else:
                 # Fallback if model not set
-                ai_analysis = analysis_data['data_summary']
+                ai_analysis = analysis_data.get('data_summary', '')
             
             print(f"   ↳ Generated: {len(charts)} charts")
             print(f"✅ [ROI TOOL] Analysis complete with AI insights")
