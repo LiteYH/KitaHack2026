@@ -215,21 +215,15 @@ Always aim to:
                 }
             }
             
-            print(f"🎯 [AGENT] Processing message with thread_id: {thread_id}")
-            print(f"   ↳ User email: {user_email or 'None'}")
-            print(f"   ↳ Message: {user_message}")
-            
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             # Handle approval decision (resume from interrupt)
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             
             if approval_decision:
                 approved = approval_decision.get("approved", False)
-                print(f"🔐 [HITL] Processing approval decision: {approved}")
                 
                 if not approved:
                     # User rejected tool execution
-                    print(f"❌ [HITL] User rejected tool execution")
                     return (
                         "I understand. I won't access your ROI data. Feel free to ask me anything else about marketing strategies, content creation, or general business advice! 😊",
                         None,
@@ -239,31 +233,20 @@ Always aim to:
                     )
                 
                 # User approved - resume execution
-                print(f"✅ [HITL] User approved - resuming agent execution")
-                print(f"   ↳ User email for data access: {user_email}")
-                
                 # Get current state and inject user_email into tool args if missing
                 state = self.agent.get_state(config)
                 
-                # Log the pending tool call for debugging
+                # Inject user_email into tool args if missing
                 if state.values.get("messages"):
                     last_msg = state.values["messages"][-1]
                     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
                         tool_call = last_msg.tool_calls[0]
                         tool_args = tool_call.get("args", {})
                         
-                        print(f"   ↳ Resuming tool: {tool_call.get('name')}")
-                        print(f"   ↳ Tool args BEFORE injection: {tool_args}")
-                        
                         # CRITICAL FIX: Inject user_email if missing or empty
                         if not tool_args.get("user_email") and user_email:
-                            print(f"   ⚠️  user_email missing in tool args - injecting from config")
                             tool_args["user_email"] = user_email
-                            # Update the tool call with corrected args
                             tool_call["args"] = tool_args
-                            print(f"   ✅ Tool args AFTER injection: {tool_args}")
-                        else:
-                            print(f"   ✅ user_email present in tool args: {tool_args.get('user_email')}")
                 
                 # Continue execution with potentially updated tool args
                 result = None
@@ -321,20 +304,6 @@ Always aim to:
             result = None
             async for event in self.agent.astream(agent_input, config, stream_mode="values"):
                 result = event
-                # Debug: Log messages as they're generated
-                if "messages" in event:
-                    last_msg = event["messages"][-1]
-                    if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-                        print(f"\n🔍 [DEBUG] AI generated tool call:")
-                        for tc in last_msg.tool_calls:
-                            print(f"   Tool: {tc.get('name')}")
-                            print(f"   Args: {tc.get('args')}")
-                            print(f"   Args type: {type(tc.get('args'))}")
-                            if 'user_email' in tc.get('args', {}):
-                                print(f"   ✅ user_email present: '{tc['args']['user_email']}'")
-                            else:
-                                print(f"   ❌ user_email MISSING from tool args!")
-                                print(f"   Available in config: '{config.get('configurable', {}).get('user_email', 'NOT FOUND')}'")
             
             # Check if agent was interrupted (tool execution needs approval)
             state = self.agent.get_state(config)

@@ -153,32 +153,11 @@ Data is filtered by user_email to ensure privacy."""
                     
                     if not user_email and isinstance(config, dict):
                         user_email = config.get('configurable', {}).get('user_email', '')
-                    
-                    if user_email:
-                        print(f"   📧 Retrieved user_email from runtime config: {user_email}")
-                except Exception as e:
-                    print(f"   ⚠️  Could not retrieve user_email from runtime config: {e}")
-            
-            print(f"\n🎯 [ROI TOOL] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            print(f"🚀 [ROI TOOL] Executing ROI Analysis (Post-Approval)")
-            print(f"   ✓ User email (from args): '{user_email}'")
-            print(f"   ✓ User email (length): {len(user_email) if user_email else 0}")
-            print(f"   ✓ User email (repr): {repr(user_email)}")
-            print(f"   ✓ Query: {user_message}")
-            print(f"   ✓ Approval: GRANTED via LangGraph HITL")
-            print(f"   ✓ Data source: Firebase ROI Collection")
-            if user_email:
-                print(f"   ✓ Filter: user_email == '{user_email}'")
-            print(f"🎯 [ROI TOOL] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+                except Exception:
+                    pass
             
             # Validate user_email is present
             if not user_email or user_email.strip() == "":
-                print(f"   ❌ ERROR: No user_email provided in tool args or config!")
-                print(f"   ↳ user_email value: {repr(user_email)}")
-                print(f"   ↳ run_manager: {run_manager}")
-                print(f"   ↳ run_manager type: {type(run_manager)}")
-                if run_manager:
-                    print(f"   ↳ run_manager.__dict__: {run_manager.__dict__ if hasattr(run_manager, '__dict__') else 'N/A'}")
                 return json.dumps({
                     "success": False,
                     "error": "User email is required to access ROI data. Please ensure you're logged in.",
@@ -191,32 +170,13 @@ Data is filtered by user_email to ensure privacy."""
             # 2. Analyze the data based on the user's question
             # 3. Generate insights and chart configurations
             # Note: Skip custom confirmation since LangGraph HITL already handled approval
-            print(f"   📞 Calling roi_analysis_service.process_roi_query()...")
-            print(f"      user_message: {user_message}")
-            print(f"      user_email: '{user_email}'")
-            print(f"      skip_confirmation: True")
-            
             analysis_data, charts, _ = await roi_analysis_service.process_roi_query(
                 user_message=user_message,
                 user_email=user_email,
                 skip_confirmation=True  # LangGraph already handled approval
             )
             
-            print(f"\n   📥 Received response from process_roi_query()")
-            print(f"      analysis_data keys: {list(analysis_data.keys())}")
-            print(f"      found_data: {analysis_data.get('found_data')}")
-            print(f"      charts count: {len(charts) if charts else 0}")
-            if 'debug_info' in analysis_data:
-                print(f"      debug_info: {analysis_data['debug_info']}")
-            
-            print(f"✅ [ROI TOOL] Analysis completed successfully")
-            print(f"   ↳ Charts generated: {len(charts) if charts else 0}")
-            print(f"   ↳ Data retrieved from Firebase for user: {user_email}")
-            print(f"🎯 [ROI TOOL] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-            
             if not analysis_data.get("found_data"):
-                print(f"   ↳ No data found")
                 return json.dumps({
                     "success": True,
                     "analysis": "I couldn't find any ROI data for your account. Please make sure you have uploaded video performance data to get insights.",
@@ -225,8 +185,6 @@ Data is filtered by user_email to ensure privacy."""
                 }, indent=2)
             
             # Pass data to AI for intelligent analysis
-            print(f"   ↳ Passing data to AI for analysis...")
-            
             system_prompt = """You are a data analyst expert specializing in YouTube content ROI analysis.
 Your task is to analyze the provided ROI data and generate insightful, actionable recommendations.
 
@@ -262,9 +220,6 @@ Please provide an insightful analysis of this ROI data, directly addressing the 
                 # Fallback if model not set
                 ai_analysis = analysis_data.get('data_summary', '')
             
-            print(f"   ↳ Generated: {len(charts)} charts")
-            print(f"✅ [ROI TOOL] Analysis complete with AI insights")
-            
             # Return structured result as JSON
             result = {
                 "success": True,
@@ -277,7 +232,6 @@ Please provide an insightful analysis of this ROI data, directly addressing the 
             
         except Exception as e:
             error_msg = f"Error in ROI analysis: {str(e)}"
-            print(f"❌ [ROI TOOL ERROR] {error_msg}")
             import traceback
             traceback.print_exc()
             

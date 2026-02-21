@@ -195,76 +195,34 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
             List of video ROI data
         """
         try:
-            print(f"\n{'='*60}")
-            print(f"📊 [FIREBASE QUERY] Starting ROI data fetch")
-            print(f"{'='*60}")
-            print(f"   User Email: {user_email}")
-            print(f"   Collection: ROI")
-            print(f"   Filter: user_email == '{user_email}'")
-            print(f"   Time period: {f'Last {days} days' if days else 'All time'}")
-            
             # Check if database is initialized
             if self.db is None:
-                print(f"   ❌ ERROR: Firestore database not initialized!")
                 return []
-            
-            print(f"   ✅ Firestore client initialized")
             
             # Build and execute query
             collection_ref = self.db.collection('ROI')
-            print(f"   ✅ Collection reference created: {collection_ref}")
-            
             query = collection_ref.where('user_email', '==', user_email)
-            print(f"   ✅ Query built with filter: user_email == '{user_email}'")
-            
-            print(f"   🔍 Executing query.stream()...")
             docs = query.stream()
             
-            print(f"   ✅ Query executed, iterating through results...")
-            
             videos = []
-            doc_count = 0
             for doc in docs:
-                doc_count += 1
-                print(f"      📄 Document {doc_count}: ID = {doc.id}")
-                
                 video_data = doc.to_dict()
                 video_data['id'] = doc.id
                 videos.append(video_data)
-                
-                # Debug: Log first video structure
-                if doc_count == 1:
-                    print(f"      ↳ Document keys: {list(video_data.keys())}")
-                    print(f"      ↳ User email in doc: {video_data.get('user_email', 'NOT FOUND')}")
-                    print(f"      ↳ Has 'metrics'? {('metrics' in video_data)}")
-                    print(f"      ↳ Has 'costs'? {('costs' in video_data)}")
-                    print(f"      ↳ Has 'revenue'? {('revenue' in video_data)}")
-                    print(f"      ↳ Has 'roi_analysis'? {('roi_analysis' in video_data)}")
-            
-            print(f"\n   {'─'*58}")
-            print(f"   📊 QUERY RESULT: Found {len(videos)} document(s)")
-            print(f"   {'─'*58}")
             
             # Filter by date if specified
             if days is not None:
                 date_threshold = (datetime.now() - timedelta(days=days)).isoformat()
-                print(f"   📅 Applying date filter: >= {date_threshold}")
-                videos_before = len(videos)
                 videos = [
                     v for v in videos 
                     if v.get('publish_date', '') >= date_threshold
                 ]
-                print(f"   📅 Date filter: {videos_before} → {len(videos)} video(s)")
             
-            print(f"{'='*60}\n")
             return videos
             
         except Exception as e:
-            print(f"\n   ❌ ERROR fetching ROI data:")
-            print(f"      {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
-            print(f"{'='*60}\n")
             return []
     
     def analyze_roi_data(
@@ -283,7 +241,6 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
             Analysis results with metrics and insights
         """
         if not videos:
-            print(f"\n📊 [ANALYSIS] No videos to analyze")
             return {
                 "found_data": False,
                 "message": "No ROI data found for the specified period."
@@ -292,54 +249,13 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
         try:
             # Calculate overall metrics
             total_videos = len(videos)
-            print(f"\n{'='*60}")
-            print(f"📊 [ANALYSIS] Analyzing {total_videos} video(s)")
-            print(f"{'='*60}")
-            print(f"   Sample video keys: {list(videos[0].keys())}")
-            
-            # Verify required fields exist
-            required_fields = {
-                'metrics': ['views', 'likes', 'comments', 'retention_rate_percent'],
-                'revenue': ['total_revenue_usd', 'ad_revenue_usd', 'sponsorship_revenue_usd', 'affiliate_revenue_usd'],
-                'costs': ['total_cost_usd'],
-                'roi_analysis': ['roi_percent', 'net_profit_usd']
-            }
-            
-            sample_video = videos[0]
-            print(f"   Validating data structure...")
-            for parent_key, child_keys in required_fields.items():
-                if parent_key not in sample_video:
-                    print(f"   ❌ Missing top-level key: '{parent_key}'")
-                else:
-                    print(f"   ✅ Has '{parent_key}'")
-                    for child_key in child_keys:
-                        if child_key not in sample_video[parent_key]:
-                            print(f"      ❌ Missing '{parent_key}.{child_key}'")
-                        else:
-                            print(f"      ✅ Has '{parent_key}.{child_key}'")
-            
-            print(f"\n   Calculating metrics...")
             total_views = sum(v['metrics']['views'] for v in videos)
             total_revenue = sum(v['revenue']['total_revenue_usd'] for v in videos)
             total_cost = sum(v['costs']['total_cost_usd'] for v in videos)
             total_profit = total_revenue - total_cost
             overall_roi = ((total_revenue - total_cost) / total_cost * 100) if total_cost > 0 else 0
             
-            print(f"   ✅ Metrics calculated successfully")
-            print(f"      Total Views: {total_views:,}")
-            print(f"      Total Revenue: ${total_revenue:,.2f}")
-            print(f"      Total Cost: ${total_cost:,.2f}")
-            print(f"      Overall ROI: {overall_roi:.2f}%")
-            
         except KeyError as e:
-            print(f"\n   ❌ [ANALYSIS ERROR] KeyError - Missing field: {e}")
-            print(f"   ↳ Available fields in first video: {list(videos[0].keys())}")
-            if videos[0]:
-                for key, value in videos[0].items():
-                    if isinstance(value, dict):
-                        print(f"   ↳ '{key}' contains: {list(value.keys())}")
-            print(f"{'='*60}\n")
-            print(f"{'='*60}\n")
             return {
                 "found_data": False,
                 "error": f"Data structure mismatch: missing field {e}",
@@ -351,10 +267,8 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
                 }
             }
         except Exception as e:
-            print(f"\n   ❌ [ANALYSIS ERROR] Unexpected error: {type(e).__name__}: {e}")
             import traceback
             traceback.print_exc()
-            print(f"{'='*60}\n")
             return {
                 "found_data": False,
                 "error": f"Analysis failed: {str(e)}",
@@ -433,13 +347,6 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
                 daily_data[date_key]['roi'] = daily_data[date_key]['roi'] / video_count
         
         trend_data = sorted(daily_data.values(), key=lambda x: x['date'])
-        
-        print(f"\n   ✅ Analysis completed successfully!")
-        print(f"   ↳ Best performing video: {best_video.get('title', 'Unknown')}")
-        print(f"   ↳ Best ROI: {best_video['roi_analysis']['roi_percent']:.2f}%")
-        print(f"   ↳ Categories analyzed: {len(category_stats)}")
-        print(f"   ↳ Trend data points: {len(trend_data)}")
-        print(f"{'='*60}\n")
         
         return {
             "found_data": True,
