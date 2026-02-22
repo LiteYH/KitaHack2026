@@ -195,8 +195,15 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
             List of video ROI data
         """
         try:
+            print(f"\n{'='*60}")
+            print(f"🔍 [FETCH] Querying Firebase ROI collection")
+            print(f"   User Email: {user_email}")
+            print(f"   Days Filter: {days if days else 'All time'}")
+            print(f"{'='*60}\n")
+            
             # Check if database is initialized
             if self.db is None:
+                print("❌ [ERROR] Firebase database not initialized")
                 return []
             
             # Build and execute query
@@ -210,18 +217,58 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
                 video_data['id'] = doc.id
                 videos.append(video_data)
             
+            print(f"✅ [FETCH] Retrieved {len(videos)} video(s) from Firebase")
+            
+            # Log a sample video structure if available
+            if videos:
+                sample = videos[0]
+                print(f"\n{'='*60}")
+                print(f"📋 [SAMPLE] First video data structure:")
+                print(f"   Document ID: {sample.get('id', 'N/A')}")
+                print(f"   Title: {sample.get('title', 'N/A')}")
+                print(f"   Category: {sample.get('category', 'N/A')}")
+                print(f"   Available top-level fields: {list(sample.keys())}")
+                
+                # Check nested structures
+                if 'metrics' in sample:
+                    print(f"   Metrics fields: {list(sample['metrics'].keys())}")
+                else:
+                    print(f"   ⚠️ WARNING: 'metrics' field not found!")
+                    
+                if 'revenue' in sample:
+                    print(f"   Revenue fields: {list(sample['revenue'].keys())}")
+                else:
+                    print(f"   ⚠️ WARNING: 'revenue' field not found!")
+                    
+                if 'costs' in sample:
+                    print(f"   Costs fields: {list(sample['costs'].keys())}")
+                else:
+                    print(f"   ⚠️ WARNING: 'costs' field not found!")
+                    
+                if 'roi_analysis' in sample:
+                    print(f"   ROI Analysis fields: {list(sample['roi_analysis'].keys())}")
+                else:
+                    print(f"   ⚠️ WARNING: 'roi_analysis' field not found!")
+                print(f"{'='*60}\n")
+            
             # Filter by date if specified
             if days is not None:
                 date_threshold = (datetime.now() - timedelta(days=days)).isoformat()
+                original_count = len(videos)
                 videos = [
                     v for v in videos 
                     if v.get('publish_date', '') >= date_threshold
                 ]
+                print(f"📅 [FILTER] Applied {days} days filter: {original_count} → {len(videos)} videos")
             
             return videos
             
         except Exception as e:
             import traceback
+            print(f"\n{'='*60}")
+            print(f"❌ [ERROR] Failed to fetch ROI data")
+            print(f"   Error: {str(e)}")
+            print(f"{'='*60}")
             traceback.print_exc()
             return []
     
@@ -247,48 +294,81 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
             }
         
         try:
-            # Calculate overall metrics
+            # Log first video structure for debugging
+            if videos:
+                print(f"\n{'='*60}")
+                print(f"📊 [DEBUG] First video data structure:")
+                print(f"   Available fields: {list(videos[0].keys())}")
+                print(f"   Sample data: {videos[0]}")
+                print(f"{'='*60}\n")
+            
+            # Calculate overall metrics with defensive data access
             total_videos = len(videos)
-            total_views = sum(v['metrics']['views'] for v in videos)
-            total_revenue = sum(v['revenue']['total_revenue_usd'] for v in videos)
-            total_cost = sum(v['costs']['total_cost_usd'] for v in videos)
+            
+            # Use .get() with default values for nested structures
+            total_views = sum(
+                v.get('metrics', {}).get('views', 0) for v in videos
+            )
+            total_revenue = sum(
+                v.get('revenue', {}).get('total_revenue_usd', 0) for v in videos
+            )
+            total_cost = sum(
+                v.get('costs', {}).get('total_cost_usd', 0) for v in videos
+            )
             total_profit = total_revenue - total_cost
             overall_roi = ((total_revenue - total_cost) / total_cost * 100) if total_cost > 0 else 0
             
-        except KeyError as e:
-            return {
-                "found_data": False,
-                "error": f"Data structure mismatch: missing field {e}",
-                "message": "ROI data found but has incorrect structure. Please check Firebase data format.",
-                "debug_info": {
-                    "found_videos": len(videos),
-                    "available_fields": list(videos[0].keys()) if videos else [],
-                    "missing_field": str(e)
-                }
-            }
+            print(f"📊 [ANALYSIS] Calculated metrics:")
+            print(f"   Total Videos: {total_videos}")
+            print(f"   Total Views: {total_views}")
+            print(f"   Total Revenue: ${total_revenue:,.2f}")
+            print(f"   Total Cost: ${total_cost:,.2f}")
+            print(f"   Total Profit: ${total_profit:,.2f}")
+            print(f"   Overall ROI: {overall_roi:.2f}%\n")
+            
         except Exception as e:
             import traceback
             traceback.print_exc()
             return {
                 "found_data": False,
                 "error": f"Analysis failed: {str(e)}",
-                "message": "An error occurred while analyzing ROI data."
+                "message": "An error occurred while analyzing ROI data.",
+                "debug_info": {
+                    "found_videos": len(videos),
+                    "available_fields": list(videos[0].keys()) if videos else [],
+                    "error_details": str(e)
+                }
             }
         
-        # Revenue breakdown
-        total_ad_revenue = sum(v['revenue']['ad_revenue_usd'] for v in videos)
-        total_sponsorship = sum(v['revenue']['sponsorship_revenue_usd'] for v in videos)
-        total_affiliate = sum(v['revenue']['affiliate_revenue_usd'] for v in videos)
+        # Revenue breakdown with defensive data access
+        total_ad_revenue = sum(
+            v.get('revenue', {}).get('ad_revenue_usd', 0) for v in videos
+        )
+        total_sponsorship = sum(
+            v.get('revenue', {}).get('sponsorship_revenue_usd', 0) for v in videos
+        )
+        total_affiliate = sum(
+            v.get('revenue', {}).get('affiliate_revenue_usd', 0) for v in videos
+        )
         
-        # Engagement metrics
-        total_likes = sum(v['metrics']['likes'] for v in videos)
-        total_comments = sum(v['metrics']['comments'] for v in videos)
-        avg_retention = sum(v['metrics']['retention_rate_percent'] for v in videos) / total_videos
+        # Engagement metrics with defensive data access
+        total_likes = sum(
+            v.get('metrics', {}).get('likes', 0) for v in videos
+        )
+        total_comments = sum(
+            v.get('metrics', {}).get('comments', 0) for v in videos
+        )
+        avg_retention = sum(
+            v.get('metrics', {}).get('retention_rate_percent', 0) for v in videos
+        ) / total_videos if total_videos > 0 else 0
         
-        # Find best performing video
-        best_video = max(videos, key=lambda x: x['roi_analysis']['roi_percent'])
+        # Find best performing video with defensive access
+        best_video = max(
+            videos, 
+            key=lambda x: x.get('roi_analysis', {}).get('roi_percent', 0)
+        )
         
-        # Category performance
+        # Category performance with defensive data access
         category_stats = {}
         for video in videos:
             category = video.get('category', 'Uncategorized')
@@ -301,10 +381,10 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
                     'total_roi': 0
                 }
             category_stats[category]['count'] += 1
-            category_stats[category]['total_revenue'] += video['revenue']['total_revenue_usd']
-            category_stats[category]['total_cost'] += video['costs']['total_cost_usd']
-            category_stats[category]['total_views'] += video['metrics']['views']
-            category_stats[category]['total_roi'] += video['roi_analysis']['roi_percent']
+            category_stats[category]['total_revenue'] += video.get('revenue', {}).get('total_revenue_usd', 0)
+            category_stats[category]['total_cost'] += video.get('costs', {}).get('total_cost_usd', 0)
+            category_stats[category]['total_views'] += video.get('metrics', {}).get('views', 0)
+            category_stats[category]['total_roi'] += video.get('roi_analysis', {}).get('roi_percent', 0)
         
         # Calculate averages per category
         for category in category_stats:
@@ -312,12 +392,16 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
             category_stats[category]['avg_roi'] = category_stats[category]['total_roi'] / count
             category_stats[category]['profit'] = category_stats[category]['total_revenue'] - category_stats[category]['total_cost']
         
-        # Time-based trend
+        # Time-based trend with defensive data access
         videos_sorted = sorted(videos, key=lambda x: x.get('publish_date', ''))
         daily_data = {}
         for video in videos_sorted:
             try:
-                pub_date = datetime.fromisoformat(video['publish_date'].replace('Z', '+00:00'))
+                pub_date_str = video.get('publish_date', '')
+                if not pub_date_str:
+                    continue
+                    
+                pub_date = datetime.fromisoformat(pub_date_str.replace('Z', '+00:00'))
                 date_key = pub_date.strftime('%Y-%m-%d')
                 
                 if date_key not in daily_data:
@@ -332,12 +416,13 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
                     }
                 
                 daily_data[date_key]['videos'] += 1
-                daily_data[date_key]['revenue'] += video['revenue']['total_revenue_usd']
-                daily_data[date_key]['cost'] += video['costs']['total_cost_usd']
-                daily_data[date_key]['profit'] += video['roi_analysis']['net_profit_usd']
-                daily_data[date_key]['views'] += video['metrics']['views']
-                daily_data[date_key]['roi'] += video['roi_analysis']['roi_percent']
-            except:
+                daily_data[date_key]['revenue'] += video.get('revenue', {}).get('total_revenue_usd', 0)
+                daily_data[date_key]['cost'] += video.get('costs', {}).get('total_cost_usd', 0)
+                daily_data[date_key]['profit'] += video.get('roi_analysis', {}).get('net_profit_usd', 0)
+                daily_data[date_key]['views'] += video.get('metrics', {}).get('views', 0)
+                daily_data[date_key]['roi'] += video.get('roi_analysis', {}).get('roi_percent', 0)
+            except Exception as e:
+                print(f"⚠️ [WARNING] Skipping video due to date parsing error: {e}")
                 continue
         
         # Calculate average ROI per day
@@ -366,9 +451,9 @@ I need your permission to access your ROI data from Firebase{period_text} to ans
             },
             "best_video": {
                 "title": best_video.get('title', 'Unknown'),
-                "roi": best_video['roi_analysis']['roi_percent'],
-                "revenue": best_video['revenue']['total_revenue_usd'],
-                "views": best_video['metrics']['views']
+                "roi": best_video.get('roi_analysis', {}).get('roi_percent', 0),
+                "revenue": best_video.get('revenue', {}).get('total_revenue_usd', 0),
+                "views": best_video.get('metrics', {}).get('views', 0)
             },
             "categories": category_stats,
             "trend": trend_data,

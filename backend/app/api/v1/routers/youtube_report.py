@@ -26,20 +26,22 @@ router = APIRouter(
 
 @router.post("/generate")
 async def generate_report(
-    user_id: Optional[str] = Query(None, description="Filter by user ID")
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    user_email: Optional[str] = Query(None, description="Filter by user email")
 ):
     """
     Generate YouTube ROI report in multiple formats (HTML, PDF, TEXT, JSON)
     
     - **user_id**: Optional user ID to filter YouTube data
+    - **user_email**: Optional user email to filter YouTube data (takes precedence over user_id)
     
     Returns: JSON with HTML, PDF (base64), TEXT, and JSON content
     """
     try:
-        logger.info(f"📊 Generating YouTube ROI report (user_id: {user_id or 'all'})")
+        logger.info(f"📊 Generating YouTube ROI report (user_email: {user_email or 'N/A'}, user_id: {user_id or 'all'})")
         
         # Generate report using the YouTube PDF generator
-        result = await generate_youtube_report(user_id=user_id)
+        result = await generate_youtube_report(user_id=user_id, user_email=user_email)
         
         if not result.get("success"):
             raise HTTPException(
@@ -83,19 +85,21 @@ async def generate_report(
 
 @router.get("/download/html")
 async def download_html_report(
-    user_id: Optional[str] = Query(None, description="Filter by user ID")
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    user_email: Optional[str] = Query(None, description="Filter by user email")
 ):
     """
     Download YouTube ROI report as HTML file
     
     - **user_id**: Optional user ID to filter YouTube data
+    - **user_email**: Optional user email to filter YouTube data (takes precedence)
     
     Returns: HTML file for download
     """
     try:
-        logger.info(f"📄 Generating YouTube HTML report for download (user_id: {user_id or 'all'})")
+        logger.info(f"📄 Generating YouTube HTML report for download (user_email: {user_email or 'N/A'}, user_id: {user_id or 'all'})")
         
-        result = await generate_youtube_report(user_id=user_id)
+        result = await generate_youtube_report(user_id=user_id, user_email=user_email)
         
         if not result.get("success"):
             raise HTTPException(
@@ -127,19 +131,21 @@ async def download_html_report(
 
 @router.get("/download/pdf")
 async def download_pdf_report(
-    user_id: Optional[str] = Query(None, description="Filter by user ID")
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    user_email: Optional[str] = Query(None, description="Filter by user email")
 ):
     """
     Download YouTube ROI report as PDF file
     
     - **user_id**: Optional user ID to filter YouTube data
+    - **user_email**: Optional user email to filter YouTube data (takes precedence)
     
     Returns: PDF file for download
     """
     try:
-        logger.info(f"📄 Generating YouTube PDF report for download (user_id: {user_id or 'all'})")
+        logger.info(f"📄 Generating YouTube PDF report for download (user_email: {user_email or 'N/A'}, user_id: {user_id or 'all'})")
         
-        result = await generate_youtube_report(user_id=user_id)
+        result = await generate_youtube_report(user_id=user_id, user_email=user_email)
         
         if not result.get("success"):
             raise HTTPException(
@@ -180,19 +186,21 @@ async def download_pdf_report(
 
 @router.get("/download/text")
 async def download_text_report(
-    user_id: Optional[str] = Query(None, description="Filter by user ID")
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    user_email: Optional[str] = Query(None, description="Filter by user email")
 ):
     """
     Download YouTube ROI report as plain text file
     
     - **user_id**: Optional user ID to filter YouTube data
+    - **user_email**: Optional user email to filter YouTube data (takes precedence)
     
     Returns: Text file for download
     """
     try:
-        logger.info(f"📄 Generating YouTube text report for download (user_id: {user_id or 'all'})")
+        logger.info(f"📄 Generating YouTube text report for download (user_email: {user_email or 'N/A'}, user_id: {user_id or 'all'})")
         
-        result = await generate_youtube_report(user_id=user_id)
+        result = await generate_youtube_report(user_id=user_id, user_email=user_email)
         
         if not result.get("success"):
             raise HTTPException(
@@ -224,19 +232,21 @@ async def download_text_report(
 
 @router.get("/download/json")
 async def download_json_report(
-    user_id: Optional[str] = Query(None, description="Filter by user ID")
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    user_email: Optional[str] = Query(None, description="Filter by user email")
 ):
     """
     Download YouTube ROI data as JSON file
     
     - **user_id**: Optional user ID to filter YouTube data
+    - **user_email**: Optional user email to filter YouTube data (takes precedence)
     
     Returns: JSON file for download
     """
     try:
-        logger.info(f"📄 Generating YouTube JSON data for download (user_id: {user_id or 'all'})")
+        logger.info(f"📄 Generating YouTube JSON data for download (user_email: {user_email or 'N/A'}, user_id: {user_id or 'all'})")
         
-        result = await generate_youtube_report(user_id=user_id)
+        result = await generate_youtube_report(user_id=user_id, user_email=user_email)
         
         if not result.get("success"):
             raise HTTPException(

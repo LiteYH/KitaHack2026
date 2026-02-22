@@ -50,20 +50,27 @@ class YouTubePDFGenerator:
         if not self.xhtml2pdf_available:
             logger.warning("xhtml2pdf not available. PDF generation will be limited.")
     
-    async def generate_youtube_report(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+    async def generate_youtube_report(self, user_id: Optional[str] = None, user_email: Optional[str] = None) -> Dict[str, Any]:
         """
         Main method to generate YouTube ROI report:
         1. Analyze YouTube ROI metrics from Firestore
         2. Generate HTML report
         3. Convert HTML to PDF
         4. Return content for download (no server storage)
+        
+        Args:
+            user_id: Optional user ID for filtering
+            user_email: Optional user email for filtering (takes precedence)
         """
         try:
             logger.info("🚀 Starting YouTube ROI report generation...")
             
             # Step 1: Analyze YouTube ROI metrics and generate HTML
             logger.info("📊 Step 1: Analyzing YouTube metrics and generating HTML...")
-            html_content, report_data = await self.ai_agent.generate_html_report(user_id)
+            html_content, report_data = await self.ai_agent.generate_html_report(
+                user_id=user_id, 
+                user_email=user_email
+            )
             
             if not html_content:
                 raise Exception("Failed to generate HTML content")
@@ -189,13 +196,17 @@ class YouTubePDFGenerator:
 
 
 # Standalone function for backward compatibility
-async def generate_youtube_report(user_id: Optional[str] = None) -> Dict[str, Any]:
+async def generate_youtube_report(user_id: Optional[str] = None, user_email: Optional[str] = None) -> Dict[str, Any]:
     """
     Standalone function to generate YouTube ROI report
+    
+    Args:
+        user_id: Optional user ID for filtering
+        user_email: Optional user email for filtering (takes precedence)
     """
     try:
         pdf_generator = YouTubePDFGenerator()
-        result = await pdf_generator.generate_youtube_report(user_id)
+        result = await pdf_generator.generate_youtube_report(user_id=user_id, user_email=user_email)
         return result
     except Exception as e:
         logger.error(f"❌ Standalone YouTube report generation failed: {str(e)}")

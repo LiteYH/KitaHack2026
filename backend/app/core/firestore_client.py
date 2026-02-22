@@ -42,9 +42,17 @@ class FirestoreClient:
             logger.error(f"❌ Failed to get Firestore client: {e}")
             self.firebase_available = False
     
-    async def get_youtube_roi_data(self, user_id: Optional[str] = None, limit: int = 1000) -> List[Dict[str, Any]]:
+    async def get_youtube_roi_data(self, user_id: Optional[str] = None, user_email: Optional[str] = None, limit: int = 1000) -> List[Dict[str, Any]]:
         """
-        Fetch YouTube ROI data from Firestore 'roi_metrics' collection
+        Fetch YouTube ROI data from Firestore 'ROI' collection
+        
+        Args:
+            user_id: Filter by user ID (optional)
+            user_email: Filter by user email (optional, takes precedence over user_id)
+            limit: Maximum number of records to fetch
+        
+        Returns:
+            List of ROI data dictionaries
         """
         try:
             if not self.firebase_available or not self.db:
@@ -53,16 +61,21 @@ class FirestoreClient:
             
             logger.info(f"🔍 Fetching YouTube ROI data from Firestore (limit: {limit})...")
             
-            # Query the roi_metrics collection
-            collection_ref = self.db.collection('roi_metrics')
+            # Query the ROI collection (updated collection name)
+            collection_ref = self.db.collection('ROI')
             query = collection_ref
             
-            # Filter by user_id if provided
-            if user_id:
+            # Filter by user_email if provided (preferred)
+            if user_email:
+                logger.info(f"🔍 Filtering by user_email: {user_email}")
+                query = query.where('user_email', '==', user_email)
+            # Otherwise filter by user_id if provided
+            elif user_id:
+                logger.info(f"🔍 Filtering by user_id: {user_id}")
                 query = query.where('user_id', '==', user_id)
             
-            # Order by created_at and limit results
-            query = query.order_by('created_at', direction=firestore.Query.DESCENDING).limit(limit)
+            # Limit results (removed ordering to avoid index requirement)
+            query = query.limit(limit)
             
             # Execute query
             docs = query.stream()
@@ -79,6 +92,8 @@ class FirestoreClient:
             
         except Exception as e:
             logger.error(f"❌ Error fetching YouTube ROI data: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return []
     
     async def get_collection_stats(self, collection_name: str) -> Dict[str, Any]:

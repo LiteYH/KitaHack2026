@@ -61,12 +61,16 @@ class YouTubeROIReportAgent:
                 logger.error(f"❌ Failed to initialize Google Generative AI: {e}")
                 self.google_genai_available = False
     
-    async def generate_html_report(self, user_id: Optional[str] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    async def generate_html_report(self, user_id: Optional[str] = None, user_email: Optional[str] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
         """
         Main method to generate HTML report for YouTube ROI:
         1. Fetch YouTube ROI metrics data from Firestore
         2. Analyze the data
         3. Generate HTML optimized for xhtml2pdf
+        
+        Args:
+            user_id: Optional user ID to filter data
+            user_email: Optional user email to filter data (takes precedence)
         """
         try:
             logger.info("🚀 Starting YouTube HTML report generation...")
@@ -78,7 +82,7 @@ class YouTubeROIReportAgent:
             
             # Step 1: Fetch YouTube ROI metrics data from Firestore
             logger.info("📊 Step 1: Fetching YouTube ROI metrics from Firestore...")
-            youtube_data = await self._fetch_youtube_roi_data(user_id)
+            youtube_data = await self._fetch_youtube_roi_data(user_id=user_id, user_email=user_email)
             
             if not youtube_data or youtube_data.get('record_count', 0) == 0:
                 logger.warning("⚠️ No YouTube ROI data found, using sample data")
@@ -102,22 +106,31 @@ class YouTubeROIReportAgent:
                 "youtube_data": youtube_data,
                 "analysis": analysis,
                 "generated_at": datetime.now().isoformat(),
-                "user_id": user_id
+                "user_id": user_id,
+                "user_email": user_email
             }
             
         except Exception as e:
             logger.error(f"❌ YouTube HTML report generation failed: {str(e)}")
             return None, None
     
-    async def _fetch_youtube_roi_data(self, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    async def _fetch_youtube_roi_data(self, user_id: Optional[str] = None, user_email: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Fetch YouTube ROI metrics data from Firestore
+        
+        Args:
+            user_id: Optional user ID for filtering
+            user_email: Optional user email for filtering (takes precedence)
         """
         try:
             logger.info("🔍 Fetching YouTube ROI metrics from Firestore...")
             
             # Query YouTube ROI data from Firestore
-            raw_data = await firestore_client.get_youtube_roi_data(user_id=user_id, limit=1000)
+            raw_data = await firestore_client.get_youtube_roi_data(
+                user_id=user_id, 
+                user_email=user_email, 
+                limit=1000
+            )
             
             if not raw_data:
                 logger.warning("❌ No YouTube ROI data found in Firestore")
@@ -135,10 +148,18 @@ class YouTubeROIReportAgent:
     
     def _process_youtube_data(self, raw_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Process raw YouTube ROI data into structured format
+        Process raw YouTube ROI data from Firebase ROI collection into structured format.
+        Handles nested structure: metrics.views, revenue.total_revenue_usd, etc.
         """
         try:
-            logger.info("🔄 Processing YouTube ROI data...")
+            logger.info("🔄 Processing YouTube ROI data from Firebase...")
+            
+            if raw_data:
+                logger.info(f"📊 Sample record structure: {list(raw_data[0].keys())}")
+                logger.info(f"📊 First record sample: {json.dumps(raw_data[0], indent=2, default=str)[:500]}...")
+            else:
+                logger.warning("⚠️ No data to process")
+                return {}
             
             # Initialize totals
             totals = {
@@ -148,8 +169,9 @@ class YouTubeROIReportAgent:
                 "total_shares": 0,
                 "total_subscribers": 0,
                 "total_watch_time": 0,  # in hours
-                "total_ad_spend": 0,
+                "total_cost": 0,
                 "total_revenue": 0,
+                "total_profit": 0,
                 "total_videos": 0
             }
             
@@ -158,18 +180,36 @@ class YouTubeROIReportAgent:
             video_performance = []
             
             for record in raw_data:
-                # Extract metrics with default values
-                views = int(record.get("views", 0))
-                likes = int(record.get("likes", 0))
-                comments = int(record.get("comments", 0))
-                shares = int(record.get("shares", 0))
-                subscribers = int(record.get("subscribers_gained", 0))
-                watch_time = float(record.get("watch_time_hours", 0))
-                ad_spend = float(record.get("ad_spend", 0))
-                revenue = float(record.get("revenue_generated", 0))
+                # Extract nested metrics with default values (Firebase ROI collection structure)
+                metrics = record.get("metrics", {})
+                revenue_data = record.get("revenue", {})
+                costs_data = record.get("costs", {})
+                roi_analysis = record.get("roi_analysis", {})
                 
-                category = record.get("content_category", "General")
-                video_title = record.get("video_title", "Untitled Video")
+                views = int(metrics.get("views", 0))
+                likes = int(metrics.get("likes", 0))
+                comments = int(metrics.get("comments", 0))
+                shares = int(metrics.get("shares", 0))
+                subscribers = int(metrics.get("subscribers_gained", 0))
+                retention_rate = float(metrics.get("retention_rate_percent", 0))
+                
+                # Revenue breakdown
+                total_revenue = float(revenue_data.get("total_revenue_usd", 0))
+                ad_revenue = float(revenue_data.get("ad_revenue_usd", 0))
+                sponsorship_revenue = float(revenue_data.get("sponsorship_revenue_usd", 0))
+                affiliate_revenue = float(revenue_data.get("affiliate_revenue_usd", 0))
+                
+                # Costs
+                total_cost = float(costs_data.get("total_cost_usd", 0))
+                production_cost = float(costs_data.get("production_cost_usd", 0))
+                promotion_cost = float(costs_data.get("promotion_cost_usd", 0))
+                
+                # ROI metrics
+                roi_percent = float(roi_analysis.get("roi_percent", 0))
+                net_profit = float(roi_analysis.get("net_profit_usd", 0))
+                
+                category = record.get("category", "General")
+                video_title = record.get("title", "Untitled Video")
                 
                 # Accumulate totals
                 totals["total_views"] += views
@@ -177,9 +217,10 @@ class YouTubeROIReportAgent:
                 totals["total_comments"] += comments
                 totals["total_shares"] += shares
                 totals["total_subscribers"] += subscribers
-                totals["total_watch_time"] += watch_time
-                totals["total_ad_spend"] += ad_spend
-                totals["total_revenue"] += revenue
+                totals["total_watch_time"] += retention_rate  # Using retention rate as proxy
+                totals["total_cost"] += total_cost
+                totals["total_revenue"] += total_revenue
+                totals["total_profit"] += net_profit
                 totals["total_videos"] += 1
                 
                 # Track by category
@@ -189,15 +230,17 @@ class YouTubeROIReportAgent:
                         "likes": 0,
                         "comments": 0,
                         "revenue": 0,
-                        "ad_spend": 0,
+                        "cost": 0,
+                        "profit": 0,
                         "video_count": 0
                     }
                 
                 content_categories[category]["views"] += views
                 content_categories[category]["likes"] += likes
                 content_categories[category]["comments"] += comments
-                content_categories[category]["revenue"] += revenue
-                content_categories[category]["ad_spend"] += ad_spend
+                content_categories[category]["revenue"] += total_revenue
+                content_categories[category]["cost"] += total_cost
+                content_categories[category]["profit"] += net_profit
                 content_categories[category]["video_count"] += 1
                 
                 # Track individual video performance (top performers)
@@ -208,25 +251,28 @@ class YouTubeROIReportAgent:
                     "likes": likes,
                     "comments": comments,
                     "shares": shares,
-                    "revenue": revenue,
+                    "revenue": total_revenue,
+                    "cost": total_cost,
+                    "profit": net_profit,
+                    "roi_percent": roi_percent,
                     "engagement_rate": engagement_rate,
                     "category": category
                 })
             
             # Calculate overall ROI
             overall_roi = 0
-            if totals["total_ad_spend"] > 0:
+            if totals["total_cost"] > 0:
                 overall_roi = (
-                    (totals["total_revenue"] - totals["total_ad_spend"]) / 
-                    totals["total_ad_spend"]
+                    (totals["total_revenue"] - totals["total_cost"]) / 
+                    totals["total_cost"]
                 ) * 100
             
             # Calculate category ROI
             for category_data in content_categories.values():
-                if category_data["ad_spend"] > 0:
+                if category_data["cost"] > 0:
                     category_data["roi_percentage"] = (
-                        (category_data["revenue"] - category_data["ad_spend"]) / 
-                        category_data["ad_spend"]
+                        (category_data["revenue"] - category_data["cost"]) / 
+                        category_data["cost"]
                     ) * 100
                 else:
                     category_data["roi_percentage"] = 0
@@ -293,7 +339,7 @@ class YouTubeROIReportAgent:
                     "likes": 8500,
                     "comments": 1200,
                     "revenue": 4500.0,
-                    "ad_spend": 1200.0,
+                    "cost": 1200.0,
                     "video_count": 15,
                     "roi_percentage": 275.0
                 },
@@ -302,7 +348,7 @@ class YouTubeROIReportAgent:
                     "likes": 6200,
                     "comments": 890,
                     "revenue": 3800.0,
-                    "ad_spend": 980.0,
+                    "cost": 980.0,
                     "video_count": 12,
                     "roi_percentage": 287.76
                 },
@@ -311,7 +357,7 @@ class YouTubeROIReportAgent:
                     "likes": 12000,
                     "comments": 2100,
                     "revenue": 5200.0,
-                    "ad_spend": 1500.0,
+                    "cost": 1500.0,
                     "video_count": 20,
                     "roi_percentage": 246.67
                 }
@@ -323,7 +369,7 @@ class YouTubeROIReportAgent:
                 "total_shares": 1850,
                 "total_subscribers": 3500,
                 "total_watch_time": 15600,  # hours
-                "total_ad_spend": 3680.0,
+                "total_cost": 3680.0,
                 "total_revenue": 13500.0,
                 "total_videos": 47
             },
@@ -378,7 +424,7 @@ class YouTubeROIReportAgent:
         OVERALL YOUTUBE PERFORMANCE:
         - Overall ROI: {youtube_data.get('overall_roi', 0):.2f}%
         - Total Revenue: ${youtube_data.get('totals', {}).get('total_revenue', 0):,.2f}
-        - Total Ad Spend: ${youtube_data.get('totals', {}).get('total_ad_spend', 0):,.2f}
+        - Total Cost: ${youtube_data.get('totals', {}).get('total_cost', 0):,.2f}
         - Total Views: {youtube_data.get('totals', {}).get('total_views', 0):,}
         - Total Videos: {youtube_data.get('totals', {}).get('total_videos', 0)}
         - Overall Engagement Rate: {youtube_data.get('overall_engagement_rate', 0):.2f}%
@@ -453,7 +499,7 @@ class YouTubeROIReportAgent:
         insights.append(f"Average watch time per video: {youtube_data.get('average_watch_time', 0):.1f} hours")
         
         return {
-            "executive_summary": f"YouTube channel performance shows {overall_roi:.1f}% ROI with {self._format_currency(totals.get('total_revenue', 0))} in revenue from {self._format_currency(totals.get('total_ad_spend', 0))} investment. {top_category} category is the top performer.",
+            "executive_summary": f"YouTube channel performance shows {overall_roi:.1f}% ROI with {self._format_currency(totals.get('total_revenue', 0))} in revenue from {self._format_currency(totals.get('total_cost', 0))} investment. {top_category} category is the top performer.",
             "key_insights": insights,
             "top_category": top_category,
             "content_strategy": f"Focus on {top_category} content which shows the highest ROI. Maintain consistent upload schedule and optimize for viewer engagement.",
@@ -687,7 +733,7 @@ class YouTubeROIReportAgent:
                         <th>Views</th>
                         <th>Likes</th>
                         <th>Comments</th>
-                        <th>Ad Spend</th>
+                        <th>Cost</th>
                         <th>Revenue</th>
                         <th>ROI %</th>
                     </tr>
@@ -704,7 +750,7 @@ class YouTubeROIReportAgent:
                         <td>{self._format_number(data.get('views', 0))}</td>
                         <td>{self._format_number(data.get('likes', 0))}</td>
                         <td>{self._format_number(data.get('comments', 0))}</td>
-                        <td>{self._format_currency(data.get('ad_spend', 0))}</td>
+                        <td>{self._format_currency(data.get('cost', 0))}</td>
                         <td>{self._format_currency(data.get('revenue', 0))}</td>
                         <td>{self._format_number(data.get('roi_percentage', 0))}%</td>
                     </tr>
@@ -717,7 +763,7 @@ class YouTubeROIReportAgent:
                         <td>{self._format_number(totals.get('total_views', 0))}</td>
                         <td>{self._format_number(totals.get('total_likes', 0))}</td>
                         <td>{self._format_number(totals.get('total_comments', 0))}</td>
-                        <td>{self._format_currency(totals.get('total_ad_spend', 0))}</td>
+                        <td>{self._format_currency(totals.get('total_cost', 0))}</td>
                         <td>{self._format_currency(totals.get('total_revenue', 0))}</td>
                         <td>{self._format_number(overall_roi)}%</td>
                     </tr>

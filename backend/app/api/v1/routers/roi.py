@@ -96,44 +96,83 @@ async def get_roi_analytics_summary(
             if v.get('publish_date', '') >= date_threshold
         ]
         
-        # Calculate overall metrics
+        # Calculate overall metrics with defensive data access
         total_videos = len(videos)
-        total_views = sum(v['metrics']['views'] for v in videos)
-        total_revenue = sum(v['revenue']['total_revenue_usd'] for v in videos)
-        total_cost = sum(v['costs']['total_cost_usd'] for v in videos)
+        total_views = sum(
+            v.get('metrics', {}).get('views', 0) for v in videos
+        )
+        total_revenue = sum(
+            v.get('revenue', {}).get('total_revenue_usd', 0) for v in videos
+        )
+        total_cost = sum(
+            v.get('costs', {}).get('total_cost_usd', 0) for v in videos
+        )
         total_profit = total_revenue - total_cost
         overall_roi = ((total_revenue - total_cost) / total_cost * 100) if total_cost > 0 else 0
         
-        # Revenue breakdown
-        total_ad_revenue = sum(v['revenue']['ad_revenue_usd'] for v in videos)
-        total_sponsorship = sum(v['revenue']['sponsorship_revenue_usd'] for v in videos)
-        total_affiliate = sum(v['revenue']['affiliate_revenue_usd'] for v in videos)
+        # Revenue breakdown with defensive data access
+        total_ad_revenue = sum(
+            v.get('revenue', {}).get('ad_revenue_usd', 0) for v in videos
+        )
+        total_sponsorship = sum(
+            v.get('revenue', {}).get('sponsorship_revenue_usd', 0) for v in videos
+        )
+        total_affiliate = sum(
+            v.get('revenue', {}).get('affiliate_revenue_usd', 0) for v in videos
+        )
         
-        # Cost breakdown
-        total_production_cost = sum(v['costs']['production_cost_usd'] for v in videos)
-        total_promotion_cost = sum(v['costs']['promotion_cost_usd'] for v in videos)
+        # Cost breakdown with defensive data access
+        total_production_cost = sum(
+            v.get('costs', {}).get('production_cost_usd', 0) for v in videos
+        )
+        total_promotion_cost = sum(
+            v.get('costs', {}).get('promotion_cost_usd', 0) for v in videos
+        )
         
-        # Engagement metrics
-        total_likes = sum(v['metrics']['likes'] for v in videos)
-        total_comments = sum(v['metrics']['comments'] for v in videos)
-        total_shares = sum(v['metrics']['shares'] for v in videos)
-        total_subscribers = sum(v['metrics']['subscribers_gained'] for v in videos)
-        avg_retention = sum(v['metrics']['retention_rate_percent'] for v in videos) / total_videos
-        avg_ctr = sum(v['metrics']['ctr_percent'] for v in videos) / total_videos
+        # Engagement metrics with defensive data access
+        total_likes = sum(
+            v.get('metrics', {}).get('likes', 0) for v in videos
+        )
+        total_comments = sum(
+            v.get('metrics', {}).get('comments', 0) for v in videos
+        )
+        total_shares = sum(
+            v.get('metrics', {}).get('shares', 0) for v in videos
+        )
+        total_subscribers = sum(
+            v.get('metrics', {}).get('subscribers_gained', 0) for v in videos
+        )
+        avg_retention = sum(
+            v.get('metrics', {}).get('retention_rate_percent', 0) for v in videos
+        ) / total_videos if total_videos > 0 else 0
+        avg_ctr = sum(
+            v.get('metrics', {}).get('ctr_percent', 0) for v in videos
+        ) / total_videos if total_videos > 0 else 0
         
         # Per video averages
         avg_views = total_views / total_videos
         avg_revenue = total_revenue / total_videos
         avg_cost = total_cost / total_videos
         avg_profit = total_profit / total_videos
-        avg_roi = sum(v['roi_analysis']['roi_percent'] for v in videos) / total_videos
+        avg_roi = sum(
+            v.get('roi_analysis', {}).get('roi_percent', 0) for v in videos
+        ) / total_videos if total_videos > 0 else 0
         
-        # Find best and worst performing videos
-        best_video = max(videos, key=lambda x: x['roi_analysis']['roi_percent'])
-        worst_video = min(videos, key=lambda x: x['roi_analysis']['roi_percent'])
-        most_viewed = max(videos, key=lambda x: x['metrics']['views'])
+        # Find best and worst performing videos with defensive access
+        best_video = max(
+            videos, 
+            key=lambda x: x.get('roi_analysis', {}).get('roi_percent', 0)
+        )
+        worst_video = min(
+            videos, 
+            key=lambda x: x.get('roi_analysis', {}).get('roi_percent', 0)
+        )
+        most_viewed = max(
+            videos, 
+            key=lambda x: x.get('metrics', {}).get('views', 0)
+        )
         
-        # Category performance
+        # Category performance with defensive data access
         category_stats = {}
         for video in videos:
             category = video.get('category', 'Uncategorized')
@@ -146,10 +185,10 @@ async def get_roi_analytics_summary(
                     'total_roi': 0
                 }
             category_stats[category]['count'] += 1
-            category_stats[category]['total_revenue'] += video['revenue']['total_revenue_usd']
-            category_stats[category]['total_cost'] += video['costs']['total_cost_usd']
-            category_stats[category]['total_views'] += video['metrics']['views']
-            category_stats[category]['total_roi'] += video['roi_analysis']['roi_percent']
+            category_stats[category]['total_revenue'] += video.get('revenue', {}).get('total_revenue_usd', 0)
+            category_stats[category]['total_cost'] += video.get('costs', {}).get('total_cost_usd', 0)
+            category_stats[category]['total_views'] += video.get('metrics', {}).get('views', 0)
+            category_stats[category]['total_roi'] += video.get('roi_analysis', {}).get('roi_percent', 0)
         
         # Calculate average ROI per category
         for category in category_stats:
@@ -158,11 +197,15 @@ async def get_roi_analytics_summary(
             category_stats[category]['avg_revenue'] = category_stats[category]['total_revenue'] / count
             category_stats[category]['profit'] = category_stats[category]['total_revenue'] - category_stats[category]['total_cost']
         
-        # Monthly trend data (last 6 months)
+        # Monthly trend data (last 6 months) with defensive data access
         monthly_data = {}
         for video in videos:
             try:
-                pub_date = datetime.fromisoformat(video['publish_date'].replace('Z', '+00:00'))
+                pub_date_str = video.get('publish_date', '')
+                if not pub_date_str:
+                    continue
+                    
+                pub_date = datetime.fromisoformat(pub_date_str.replace('Z', '+00:00'))
                 month_key = pub_date.strftime('%Y-%m')
                 
                 if month_key not in monthly_data:
@@ -176,22 +219,28 @@ async def get_roi_analytics_summary(
                     }
                 
                 monthly_data[month_key]['videos'] += 1
-                monthly_data[month_key]['revenue'] += video['revenue']['total_revenue_usd']
-                monthly_data[month_key]['cost'] += video['costs']['total_cost_usd']
-                monthly_data[month_key]['profit'] += video['roi_analysis']['net_profit_usd']
-                monthly_data[month_key]['views'] += video['metrics']['views']
-            except:
+                monthly_data[month_key]['revenue'] += video.get('revenue', {}).get('total_revenue_usd', 0)
+                monthly_data[month_key]['cost'] += video.get('costs', {}).get('total_cost_usd', 0)
+                monthly_data[month_key]['profit'] += video.get('roi_analysis', {}).get('net_profit_usd', 0)
+                monthly_data[month_key]['views'] += video.get('metrics', {}).get('views', 0)
+            except Exception as e:
                 continue
         
         # Convert to sorted list
         monthly_trend = sorted(monthly_data.values(), key=lambda x: x['month'])
         
-        # Recent performance (last 30 days)
+        # Recent performance (last 30 days) with defensive data access
         recent_metrics = {
             'videos': len(recent_videos),
-            'revenue': sum(v['revenue']['total_revenue_usd'] for v in recent_videos),
-            'cost': sum(v['costs']['total_cost_usd'] for v in recent_videos),
-            'views': sum(v['metrics']['views'] for v in recent_videos),
+            'revenue': sum(
+                v.get('revenue', {}).get('total_revenue_usd', 0) for v in recent_videos
+            ),
+            'cost': sum(
+                v.get('costs', {}).get('total_cost_usd', 0) for v in recent_videos
+            ),
+            'views': sum(
+                v.get('metrics', {}).get('views', 0) for v in recent_videos
+            ),
         }
         recent_metrics['profit'] = recent_metrics['revenue'] - recent_metrics['cost']
         recent_metrics['roi'] = ((recent_metrics['revenue'] - recent_metrics['cost']) / recent_metrics['cost'] * 100) if recent_metrics['cost'] > 0 else 0

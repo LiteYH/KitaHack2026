@@ -1,10 +1,15 @@
 "use client"
 
-import { Bot, User } from "lucide-react"
+import { Bot, User, FileText, Download } from "lucide-react"
+import { useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { Components } from "react-markdown"
 import { ROIChart, type ChartConfig } from "./roi-chart"
+import { Button } from "@/components/ui/button"
+import { useAuth } from "@/contexts/AuthContext"
+import { downloadPDFReport } from "@/lib/api/report"
+import { useToast } from "@/hooks/use-toast"
 
 export interface Message {
   id: string
@@ -19,6 +24,47 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user"
+  const { user } = useAuth()
+  const { toast } = useToast()
+  const [isDownloading, setIsDownloading] = useState(false)
+
+  // Check if this message contains ROI analysis (has charts)
+  const hasROIAnalysis = !isUser && message.charts && message.charts.length > 0
+
+  const handleDownloadReport = async () => {
+    try {
+      setIsDownloading(true)
+      
+      // Get user email for filtering ROI data
+      const userEmail = user?.email
+      
+      if (!userEmail) {
+        toast({
+          title: "Authentication Required",
+          description: "Please sign in to download your ROI report.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Download the PDF report
+      await downloadPDFReport(userEmail)
+      
+      toast({
+        title: "Report Downloaded",
+        description: "Your ROI report has been downloaded successfully.",
+      })
+    } catch (error) {
+      console.error("Error downloading report:", error)
+      toast({
+        title: "Download Failed",
+        description: error instanceof Error ? error.message : "Failed to download report. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDownloading(false)
+    }
+  }
 
   const markdownComponents: Components = {
     // Custom styling for markdown elements
@@ -84,6 +130,33 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 {message.charts.map((chart, index) => (
                   <ROIChart key={index} config={chart} />
                 ))}
+              </div>
+            )}
+            
+            {/* Create Report Button for ROI Analysis */}
+            {hasROIAnalysis && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <Button
+                  onClick={handleDownloadReport}
+                  disabled={isDownloading}
+                  className="w-full sm:w-auto"
+                  variant="default"
+                >
+                  {isDownloading ? (
+                    <>
+                      <Download className="mr-2 h-4 w-4 animate-pulse" />
+                      Generating Report...
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="mr-2 h-4 w-4" />
+                      Create Report
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Generate a comprehensive PDF report with AI-powered insights
+                </p>
               </div>
             )}
           </div>
