@@ -5,15 +5,15 @@ import { UiGraphLogo } from "./uigraph-logo"
 import { SuggestionCards } from "./suggestion-cards"
 import { ChatInput } from "./chat-input"
 import { MessageBubble, type Message } from "./message-bubble"
+import { TypingIndicator } from "./typing-indicator"
 import { sendChatMessage, type ChatMessage as APIChatMessage } from "@/lib/api/chat"
 import { useAuth } from "@/contexts/AuthContext"
 
 interface ChatAreaProps {
   onWelcomeStateChange?: (isWelcome: boolean) => void
-  onNewChatRequest?: () => void
 }
 
-export function ChatArea({ onWelcomeStateChange, onNewChatRequest }: ChatAreaProps = {}) {
+export function ChatArea({ onWelcomeStateChange }: ChatAreaProps = {}) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -26,18 +26,6 @@ export function ChatArea({ onWelcomeStateChange, onNewChatRequest }: ChatAreaPro
   useEffect(() => {
     onWelcomeStateChange?.(showWelcome)
   }, [showWelcome, onWelcomeStateChange])
-
-  // Handle new chat request from parent
-  useEffect(() => {
-    if (onNewChatRequest) {
-      const handleNewChat = () => {
-        setMessages([])
-        setInputValue("")
-      }
-      // Store the handler so parent can call it
-      ;(window as any).__handleNewChat = handleNewChat
-    }
-  }, [onNewChatRequest])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -93,19 +81,6 @@ export function ChatArea({ onWelcomeStateChange, onNewChatRequest }: ChatAreaPro
     handleSend(text)
   }
 
-  const handleNewChat = () => {
-    setMessages([])
-    setInputValue("")
-  }
-
-  // Expose handleNewChat to parent via ref-like pattern
-  useEffect(() => {
-    ;(window as any).__chatAreaHandleNewChat = handleNewChat
-    return () => {
-      delete (window as any).__chatAreaHandleNewChat
-    }
-  }, [])
-
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Scrollable content area */}
@@ -125,17 +100,7 @@ export function ChatArea({ onWelcomeStateChange, onNewChatRequest }: ChatAreaPro
             {messages.map((msg) => (
               <MessageBubble key={msg.id} message={msg} />
             ))}
-            {isLoading && (
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                  <div className="h-4 w-4 animate-pulse rounded-full bg-primary" />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <div className="h-4 w-32 animate-pulse rounded bg-muted" />
-                  <div className="h-4 w-24 animate-pulse rounded bg-muted" />
-                </div>
-              </div>
-            )}
+            {isLoading && <TypingIndicator />}
             <div ref={messagesEndRef} />
           </div>
         )}

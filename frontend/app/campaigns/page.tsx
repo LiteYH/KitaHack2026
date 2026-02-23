@@ -38,6 +38,7 @@ import {
   Filter,
   Wallet,
   Plus,
+  RefreshCw,
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -98,6 +99,7 @@ const CHART_COLORS = ["#3b82f6", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#0
 export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<CampaignWithMetrics[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [displayCount, setDisplayCount] = useState<string>("5")
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
@@ -335,6 +337,26 @@ export default function CampaignsPage() {
     }
   }
 
+  const handleRefreshCampaigns = async () => {
+    if (!user?.uid) return
+
+    try {
+      setIsRefreshing(true)
+      const data = await getCampaigns({ user_id: user.uid })
+      // Add calculated metrics to each campaign
+      const campaignsWithMetrics = data.campaigns.map(campaign => ({
+        ...campaign,
+        metrics: calculateCampaignMetrics(campaign)
+      }))
+      setCampaigns(campaignsWithMetrics)
+    } catch (error) {
+      console.error("Error refreshing campaigns:", error)
+      alert("Failed to refresh campaigns. Please try again.")
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
   const handleCreateCampaign = async () => {
     if (!user?.uid) return
 
@@ -422,13 +444,24 @@ export default function CampaignsPage() {
                     Real-time insights from Firestore - Showing metrics for ongoing campaigns only | User ID: {user?.uid?.substring(0, 8)}...
                   </p>
                 </div>
-                <Button 
-                  onClick={() => setIsCreateDialogOpen(true)}
-                  className="gap-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add Campaign
-                </Button>
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={handleRefreshCampaigns}
+                    variant="outline"
+                    className="gap-2"
+                    disabled={isRefreshing}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </Button>
+                  <Button 
+                    onClick={() => setIsCreateDialogOpen(true)}
+                    className="gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add Campaign
+                  </Button>
+                </div>
               </div>
 
               {isLoading ? (
