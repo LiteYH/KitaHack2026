@@ -149,50 +149,92 @@ export function useAgentChat(userId?: string): UseAgentChatReturn {
 
   // Load chat history from Firestore on mount (only if userId is available)
   useEffect(() => {
-    if (!userId || !threadId) return;
+    if (!userId || !threadId) {
+      console.log('[HISTORY] Skipping history load - userId or threadId not available', { userId, threadId });
+      return;
+    }
 
     let mounted = true;
 
     const loadHistory = async () => {
       try {
+        console.log(`[HISTORY] Loading history for thread ${threadId} user ${userId}`);
         setIsLoading(true);
         
         // Load thread history (includes both chat and monitoring messages)
         const historyMessages = await loadThreadHistory(threadId);
 
+        console.log(`[HISTORY] Received ${historyMessages.length} messages from API`);
+
         if (!mounted) return;
 
-        // Convert history messages to ChatMessage format
-        const chatMessages: ChatMessage[] = historyMessages.map((msg) => {
-          // Parse timestamp
-          let timestamp = Date.now();
-          if (msg.created_at) {
-            const parsed = Date.parse(msg.created_at);
-            if (!isNaN(parsed)) timestamp = parsed;
-          }
-
-          return {
-            id: msg.id,
-            role: msg.role as MessageRole,
-            content: msg.content,
-            agent: msg.agent,
-            toolArgs: msg.tool_args,
-            toolCallId: msg.tool_call_id,
-            node: msg.node,
-            timestamp,
-          };
+        // Sort history by created_at first so resolution stitching is order-safe
+        const sortedHistory = [...historyMessages].sort((a, b) => {
+          const ta = Date.parse(a.created_at) || 0;
+          const tb = Date.parse(b.created_at) || 0;
+          return ta - tb;
         });
 
-        // Sort by timestamp
-        chatMessages.sort((a, b) => a.timestamp - b.timestamp);
-
-        if (chatMessages.length > 0) {
-          setMessages(chatMessages);
-          console.log(`[HISTORY] Loaded ${historyMessages.length} messages from thread ${threadId}`);
+        // Build hitlId → resolution map:
+        // scan in time order; each hitl_resolution belongs to the last preceding hitl card
+        const hitlResolutionMap = new Map<string, ChatMessage['resolution']>();
+        let pendingHitlId: string | null = null;
+        for (const msg of sortedHistory) {
+          if (msg.role === 'hitl') {
+            pendingHitlId = msg.id;
+          } else if (msg.role === 'hitl_resolution' && pendingHitlId) {
+            const ts = Date.parse(msg.created_at) || Date.now();
+            hitlResolutionMap.set(pendingHitlId, {
+              type: (msg.metadata?.decision_type as 'approve' | 'edit' | 'reject') || 'approve',
+              decisions: (msg.metadata?.decisions as HITLDecision[]) || [],
+              timestamp: ts,
+            });
+            pendingHitlId = null;
+          }
         }
+
+        // Convert to ChatMessage, skipping hitl_resolution helper records
+        const chatMessages: ChatMessage[] = sortedHistory
+          .filter((msg) => msg.role !== 'hitl_resolution')
+          .map((msg) => {
+            let timestamp = Date.now();
+            if (msg.created_at) {
+              const parsed = Date.parse(msg.created_at);
+              if (!isNaN(parsed)) timestamp = parsed;
+            }
+
+            const base: ChatMessage = {
+              id: msg.id,
+              role: msg.role as MessageRole,
+              content: msg.content,
+              agent: msg.agent,
+              toolArgs: msg.tool_args,
+              toolCallId: msg.tool_call_id,
+              node: msg.node,
+              timestamp,
+            };
+
+            // Rebuild HITL cards: restore interrupt data and resolved state
+            if (msg.role === 'hitl') {
+              if (msg.metadata?.interrupt_data) {
+                base.interruptData = msg.metadata.interrupt_data as InterruptData[];
+              }
+              const resolution = hitlResolutionMap.get(msg.id);
+              if (resolution) {
+                base.resolution = resolution;
+              }
+            }
+
+            return base;
+          });
+
+        // Always set messages, even if empty (to clear any stale state)
+        setMessages(chatMessages);
+        console.log(`[HISTORY] Set ${chatMessages.length} messages in state for thread ${threadId}`);
       } catch (error) {
         console.error('[HISTORY] Failed to load chat history:', error);
         // Don't block the UI if history fails to load
+        setMessages([]); // Clear messages on error
       } finally {
         if (mounted) {
           setIsLoading(false);

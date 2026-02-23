@@ -41,9 +41,20 @@ export function AgentChatArea() {
 
   const showWelcome = messages.length === 0
 
+  // Scroll to bottom when messages change or on initial load
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, interrupt])
+
+  // Scroll to bottom on initial mount (page refresh)
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Use setTimeout to ensure DOM is ready
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
+      }, 100)
+    }
+  }, [])
 
   const handleSend = useCallback(
     (text: string) => {

@@ -1,8 +1,15 @@
-from .chat import ChatMessage, ChatRequest, ChatResponse, ChatStreamChunk
+from .chat import (
+    AgentChatRequest,
+    AgentChatResponse,
+    HITLDecision,
+    AgentResumeRequest,
+    AgentResumeResponse,
+)
 
 __all__ = [
-    "ChatMessage",
-    "ChatRequest",
-    "ChatResponse",
-    "ChatStreamChunk",
+    "AgentChatRequest",
+    "AgentChatResponse",
+    "HITLDecision",
+    "AgentResumeRequest",
+    "AgentResumeResponse",
 ]

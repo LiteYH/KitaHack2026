@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 from app.agents.competitor_monitoring import create_competitor_monitoring_agent
 from app.core.firebase import get_db
-from app.core.competitor_agent_memory import HybridMemoryManager
 
 
 class CompetitorAgentService:
@@ -33,7 +32,6 @@ class CompetitorAgentService:
     """
 
     def __init__(self):
-        self._memory_manager: Optional[HybridMemoryManager] = None
         self._agent = None
 
     def _ensure_init(self):
@@ -42,10 +40,7 @@ class CompetitorAgentService:
             return
 
         db = get_db()
-        self._memory_manager = HybridMemoryManager(firestore_client=db)
-        self._agent = create_competitor_monitoring_agent(
-            memory_manager=self._memory_manager,
-        )
+        self._agent = create_competitor_monitoring_agent()
 
     async def invoke(
         self,

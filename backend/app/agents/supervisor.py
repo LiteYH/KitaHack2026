@@ -1,56 +1,35 @@
-"""
-Supervisor Agent (Subagents Pattern)
+"""Supervisor Agent – coordinates specialized subagents as tools."""
 
-Main coordinator agent that manages specialized subagents as tools.
-Uses direct LangGraph streaming (no CopilotKit dependency).
-"""
-
+import uuid
 from typing import Optional
 
 from langchain.agents import create_agent
 from langchain.tools import tool
+from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphInterrupt
-from langchain_core.runnables import RunnableConfig
+from langgraph.types import Command
+from langgraph.types import interrupt as lg_interrupt
 
 from app.core.config import settings
-from app.core.competitor_agent_memory import HybridMemoryManager
 from app.agents.competitor_monitoring import create_competitor_monitoring_agent
 
 
 def create_supervisor_agent(
-    memory_manager: Optional[HybridMemoryManager] = None,
     cron_service=None,
     firestore_client=None,
     user_id: Optional[str] = None,
 ):
     """
     Create the main supervisor agent with subagents as tools.
-    
-    The supervisor:
-    - Maintains conversation context across turns
-    - Decides which specialized agent to invoke
-    - Handles general marketing questions directly
-    - Coordinates complex multi-step workflows
-    
-    Args:
-        memory_manager: Optional memory manager for cross-thread memory
-        cron_service: CronService instance for monitoring jobs
-        firestore_client: Firestore client for saving configurations
-        user_id: User ID for the current session
-    
+
     Subagents:
     - competitor_monitoring: Research and monitor competitors
-    - content_planning: Content creation and scheduling (TODO)
-    - publishing: Social media publishing (TODO)
-    - campaign_optimization: Campaign analysis (TODO)
-    - roi_dashboard: Analytics and reporting (TODO)
     """
-    
+
     # ── Initialize specialized subagents ─────────────────────────────
     competitor_agent = create_competitor_monitoring_agent(
-        memory_manager,
         cron_service=cron_service,
         firestore_client=firestore_client,
         user_id=user_id,
@@ -101,101 +80,125 @@ def create_supervisor_agent(
         """
         import logging
         logger = logging.getLogger(__name__)
-        
-        logger.info(f"[SUPERVISOR→COMPETITOR] Invoking competitor monitoring subagent")
-        logger.info(f"[SUPERVISOR→COMPETITOR] Task: {task[:200]}")
-        logger.info(f"[SUPERVISOR→COMPETITOR] Config: {config}")
-        
-        # Invoke the competitor subagent with a clean context
+
+        # ── HITL-aware subagent invocation ───────────────────────────────────
+        #
+        # PROBLEM: monitoring tools use interrupt() inside the SUBAGENT graph.
+        # In LangGraph 1.0.x, when ainvoke() encounters an interrupt it RETURNS
+        # {"__interrupt__": [...]} instead of raising GraphInterrupt. Without
+        # handling this the interrupt is silently swallowed and the frontend
+        # never sees a HITL card.
+        #
+        # SOLUTION:
+        #   1. Use a DETERMINISTIC subagent thread derived from the supervisor’s
+        #      thread_id so the subagent’s InMemorySaver checkpoint persists
+        #      across the interrupt–resume cycle.
+        #   2. On the FIRST invocation, if ainvoke returns __interrupt__, re-raise
+        #      it at the supervisor level using lg_interrupt() — which PAUSES the
+        #      supervisor graph and surfaces the HITL card.
+        #   3. On the RESUME invocation, the supervisor re-runs this tool node.
+        #      get_state() on the subagent shows it still has a pending task.
+        #      We call lg_interrupt() here too — LangGraph detects this is the
+        #      same interrupt position in a resumed node and RETURNS the
+        #      approval decision instead of raising.
+        #   4. We forward that decision to the subagent via Command(resume=...).
+        # ──────────────────────────────────────────────────────────────────────
+
+        # Derive a deterministic thread from the supervisor’s thread so the
+        # subagent’s checkpoint is reachable on resume.
+        supervisor_thread_id = config.get("configurable", {}).get("thread_id") or str(uuid.uuid4())
+        subagent_thread = f"hitl_{supervisor_thread_id}"
+        subagent_config = {"configurable": {"thread_id": subagent_thread}}
+        logger.info(f"[SUPERVISOR→COMPETITOR] supervisor_thread={supervisor_thread_id}, subagent_thread={subagent_thread}, task={task[:200]}")
+
         try:
-            result = await competitor_agent.ainvoke(
-                {"messages": [{"role": "user", "content": task}]},
-                config=config,
-            )
-            
-            logger.info(f"[SUPERVISOR→COMPETITOR] ✅ Subagent completed")
-            logger.debug(f"[SUPERVISOR→COMPETITOR] Result keys: {result.keys() if isinstance(result, dict) else 'N/A'}")
-            
-            # Extract ALL assistant messages, not just the last one
-            # This preserves intermediate conversation states
-            messages = result.get("messages", [])
-            logger.info(f"[SUPERVISOR→COMPETITOR] Received {len(messages)} messages from subagent")
-            
+            # ―― Check if the subagent has a pending interrupted task ――
+            # (means we’re in the RESUME path of a previous HITL flow)
+            subagent_interrupted = False
+            subagent_interrupt_value = None
+            try:
+                state = competitor_agent.get_state(subagent_config)
+                if state.next:  # graph is paused waiting to continue
+                    subagent_interrupted = True
+                    # Retrieve the interrupt payload stored by the monitoring tool
+                    for pending_task in state.tasks:
+                        if hasattr(pending_task, "interrupts") and pending_task.interrupts:
+                            subagent_interrupt_value = pending_task.interrupts[0].value
+                            break
+                    logger.info(f"[SUPERVISOR→COMPETITOR] 🔄 Subagent has pending interrupted state: {state.next}")
+            except Exception as state_err:
+                logger.debug(f"[SUPERVISOR→COMPETITOR] Could not read subagent state: {state_err}")
+
+            if subagent_interrupted:
+                # ―― RESUME PATH ――
+                # Surface the stored interrupt value to the supervisor graph.
+                # Because the supervisor is currently being RESUMED by the user,
+                # LangGraph will detect that lg_interrupt() is being called at the
+                # same position as the previous pause and will RETURN the decisions
+                # instead of raising again.
+                logger.info(f"[SUPERVISOR→COMPETITOR] Surfacing subagent interrupt at supervisor level for resume...")
+                decision_value = lg_interrupt(
+                    subagent_interrupt_value or {"message": "Awaiting approval to proceed with monitoring changes"}
+                )
+                logger.info(f"[SUPERVISOR→COMPETITOR] ✅ Decision received: {decision_value}")
+                # Forward the decision to the subagent using its saved checkpoint
+                result = await competitor_agent.ainvoke(
+                    Command(resume=decision_value),
+                    config=subagent_config,
+                )
+            else:
+                # ―― FRESH INVOCATION PATH ――
+                result = await competitor_agent.ainvoke(
+                    {"messages": [{"role": "user", "content": task}]},
+                    config=subagent_config,
+                )
+
+                # In LangGraph 1.0.x, ainvoke() RETURNS {"__interrupt__": [...]}
+                # instead of raising when a tool calls interrupt(). We must
+                # detect and re-surface it at the supervisor level.
+                if "__interrupt__" in result:
+                    interrupts = result["__interrupt__"]
+                    interrupt_value = interrupts[0].value if interrupts and hasattr(interrupts[0], "value") else interrupts[0] if interrupts else {}
+                    logger.info(f"[SUPERVISOR→COMPETITOR] ⏸️ Subagent interrupted — surfacing HITL at supervisor level")
+                    # lg_interrupt() RAISES on the first call (pauses supervisor).
+                    # On the resumed call it RETURNS the decision.
+                    decision_value = lg_interrupt(interrupt_value)
+                    logger.info(f"[SUPERVISOR→COMPETITOR] ✅ Post-interrupt decision: {decision_value}")
+                    # Forward to subagent (only reached on resume)
+                    result = await competitor_agent.ainvoke(
+                        Command(resume=decision_value),
+                        config=subagent_config,
+                    )
+
+            logger.info(result)
+
+            # Extract the final AI response
+            messages = result.get("messages", []) if isinstance(result, dict) else []
             if not messages:
-                logger.warning(f"[SUPERVISOR→COMPETITOR] No messages found in result")
                 return "Unable to process competitor monitoring request."
-            
-            # Collect all AI/assistant message content
-            assistant_messages = []
-            for i, msg in enumerate(messages):
-                msg_type = type(msg).__name__
-                has_content = hasattr(msg, "content")
-                content_type = type(msg.content).__name__ if has_content else "N/A"
-                logger.info(f"[SUPERVISOR→COMPETITOR] Message {i+1}/{len(messages)}: type={msg_type}, has_content={has_content}, content_type={content_type}")
-                
-                # Log message role if available
-                if hasattr(msg, "role"):
-                    logger.debug(f"[SUPERVISOR→COMPETITOR] Message {i+1} role: {msg.role}")
-                
-                # Only include assistant/AI messages (skip user messages, tool calls, etc.)
-                if msg_type in ["AIMessage", "AssistantMessage"]:
-                    if hasattr(msg, "content") and msg.content:
-                        content = msg.content
-                        # Handle both string and structured content
-                        if isinstance(content, str):
-                            content_preview = content[:100] if len(content) > 100 else content
-                            logger.info(f"[SUPERVISOR→COMPETITOR] ✓ Adding string message {i+1}: length={len(content)}, preview={content_preview}...")
-                            assistant_messages.append(content)
-                        elif isinstance(content, list):
-                            # Handle structured content (e.g., text blocks)
-                            logger.info(f"[SUPERVISOR→COMPETITOR] Processing structured content with {len(content)} blocks")
-                            text_content = " ".join([
-                                block.get("text", "") if isinstance(block, dict) else str(block)
-                                for block in content
-                            ])
-                            if text_content.strip():
-                                logger.info(f"[SUPERVISOR→COMPETITOR] ✓ Adding structured message {i+1}: length={len(text_content)}")
-                                assistant_messages.append(text_content)
-                            else:
-                                logger.warning(f"[SUPERVISOR→COMPETITOR] ✗ Structured content {i+1} is empty after processing")
-                        else:
-                            logger.warning(f"[SUPERVISOR→COMPETITOR] ✗ Unexpected content type for message {i+1}: {type(content)}")
-                    else:
-                        logger.warning(f"[SUPERVISOR→COMPETITOR] ✗ Message {i+1} is AIMessage but has no content")
-                else:
-                    logger.debug(f"[SUPERVISOR→COMPETITOR] ✗ Skipping message {i+1} (not assistant/AI): {msg_type}")
-            
-            if assistant_messages:
-                # Join all messages with paragraph breaks
-                # This preserves the full conversation flow
-                full_response = "\n\n".join(assistant_messages)
-                logger.info(f"[SUPERVISOR→COMPETITOR] ✅ Returning {len(assistant_messages)} message(s)")
-                logger.info(f"[SUPERVISOR→COMPETITOR] Total content length: {len(full_response)} chars")
-                logger.info(f"[SUPERVISOR→COMPETITOR] Full response preview (first 200 chars): {full_response[:200]}")
-                logger.info(f"[SUPERVISOR→COMPETITOR] Full response end (last 100 chars): {full_response[-100:] if len(full_response) > 100 else full_response}")
-                return full_response
-            
-            # Fallback to last message if no assistant messages found
-            last_message = messages[-1]
-            if hasattr(last_message, "content"):
-                content = last_message.content
-                logger.info(f"[SUPERVISOR→COMPETITOR] Fallback: returning last message")
-                return content if isinstance(content, str) else str(content)
-            
-            logger.warning(f"[SUPERVISOR→COMPETITOR] No valid messages found in result")
+
+            # Walk backwards to find the last AI message with content
+            for msg in reversed(messages):
+                if type(msg).__name__ not in ("AIMessage", "AssistantMessage"):
+                    continue
+                content = getattr(msg, "content", "")
+                if isinstance(content, list):
+                    content = " ".join(
+                        b.get("text", "") if isinstance(b, dict) else str(b)
+                        for b in content
+                    )
+                if content:
+                    logger.info(f"[SUPERVISOR→COMPETITOR] ✅ {len(content)} chars")
+                    return content
+
             return "Unable to process competitor monitoring request."
-        
+
         except GraphInterrupt:
-            # Don't catch GraphInterrupt - let it propagate to LangGraph's tool executor
-            # LangGraph will convert it to an __interrupt__ event in the stream
-            logger.info(f"[SUPERVISOR→COMPETITOR] 🔄 GraphInterrupt - propagating to LangGraph")
+            logger.info("[SUPERVISOR→COMPETITOR] 🔄 GraphInterrupt propagating")
             raise
-        
         except Exception as e:
-            # Catch other exceptions
-            logger.error(f"[SUPERVISOR→COMPETITOR] ❌ Error invoking subagent: {e}", exc_info=True)
+            logger.error(f"[SUPERVISOR→COMPETITOR] ❌ {e}", exc_info=True)
             return f"Error processing competitor monitoring request: {str(e)}"
-    
     # TODO: Add more subagent tools as they're built
     # @tool
     # def content_planning(task: str) -> str:
@@ -253,6 +256,8 @@ You are the SUPERVISOR that coordinates specialized agents. Your role is to:
 - Research a specific competitor by name (e.g., "Research Nike", "What is Adidas doing?")
 - Find recent competitor news, product launches, or pricing changes
 - Set up continuous monitoring for a competitor (daily/weekly tracking)
+- Check what competitors they're currently monitoring ("What am I monitoring?")
+- Modify or delete existing monitoring configurations
 - Analyze competitor strategies based on current market data
 - Get competitive intelligence reports
 
@@ -260,7 +265,8 @@ You are the SUPERVISOR that coordinates specialized agents. Your role is to:
 - Provide a CLEAR, SPECIFIC task description
 - Include the competitor name if mentioned
 - Specify what aspects to research (products, pricing, news, social, strategy)
-- If user wants monitoring, explicitly say "set up monitoring for [competitor]"
+- If user wants monitoring management, be specific: "check user competitors", "update Nike monitoring", "delete Adidas monitoring"
+- If user wants monitoring setup, explicitly say "set up monitoring for [competitor]"
 
 **Examples:**
 ```
@@ -269,6 +275,15 @@ User: "What is Nike doing lately?"
 
 User: "Monitor Adidas daily"
 → Call tool: "Set up daily monitoring for Adidas to track products, pricing, news, and social media"
+
+User: "What am I monitoring?"
+→ Call tool: "Check which competitors the user is currently monitoring and show their status"
+
+User: "Change Nike monitoring to every 2 hours"
+→ Call tool: "Update Nike's monitoring frequency to check every 2 hours"
+
+User: "Delete the Adidas monitor"
+→ Call tool: "Delete the monitoring configuration for Adidas"
 
 User: "Compare Nike and Adidas pricing"
 → Call tool: "Research and compare current pricing strategies for Nike and Adidas athletic footwear"
@@ -326,16 +341,12 @@ User: "Research Adidas, then help me write a marketing strategy"
 Always complete one specialist task before moving to the next.
 """
     
-    # Create supervisor with subagent tools and checkpointer for memory
-    checkpointer = (
-        memory_manager.checkpointer if memory_manager else MemorySaver()
-    )
-    
+    # Create supervisor with its own checkpointer for conversation memory
     supervisor = create_agent(
         model=model,
         tools=subagent_tools,
         system_prompt=system_prompt,
-        checkpointer=checkpointer,
+        checkpointer=MemorySaver(),
         name="supervisor",
     )
     

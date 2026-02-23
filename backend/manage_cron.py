@@ -11,7 +11,6 @@ import sys
 from app.core.firebase import get_db
 from app.services.cron_service import CronService
 from app.services.monitoring_service import monitoring_service
-from app.services.notification_service import notification_service
 
 
 async def list_jobs():
@@ -58,7 +57,7 @@ async def list_jobs():
 async def cleanup():
     """Clean up orphaned jobs."""
     db = get_db()
-    cron_service = CronService(db, monitoring_service, notification_service)
+    cron_service = CronService(db, monitoring_service)
     await cron_service.start()
     
     print("\n🧹 Cleaning up orphaned jobs...")

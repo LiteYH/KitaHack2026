@@ -1,7 +1,6 @@
 import firebase_admin
 from firebase_admin import credentials, auth, firestore
 from app.core.config import settings
-import json
 from typing import Optional
 
 _app: Optional[firebase_admin.App] = None

@@ -101,7 +101,7 @@ class ChatHistoryService:
         self,
         thread_id: str,
         user_id: str,
-        limit: int = 100
+        # limit: int = 100
     ) -> List[Dict[str, Any]]:
         """
         Retrieve messages for a thread.
@@ -115,12 +115,12 @@ class ChatHistoryService:
             List of message dicts, ordered by timestamp (oldest first)
         """
         try:
+            # Query without order_by to avoid requiring Firestore composite index
+            # We'll sort in Python instead
             messages_ref = (
                 self.firestore.collection('chat_messages')
                 .where('thread_id', '==', thread_id)
                 .where('user_id', '==', user_id)
-                .order_by('created_at')
-                .limit(limit)
             )
             
             docs = messages_ref.stream()
@@ -130,6 +130,9 @@ class ChatHistoryService:
                 data = doc.to_dict()
                 data['id'] = doc.id
                 messages.append(data)
+            
+            # Sort by created_at in Python
+            messages.sort(key=lambda x: x.get('created_at', ''))
             
             logger.info(f"Retrieved {len(messages)} messages for thread {thread_id}")
             return messages

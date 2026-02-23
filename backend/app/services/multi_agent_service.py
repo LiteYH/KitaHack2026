@@ -27,7 +27,6 @@ from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage, Huma
 logger = logging.getLogger(__name__)
 
 from app.core.firebase import get_db
-from app.core.competitor_agent_memory import HybridMemoryManager
 from app.agents.supervisor import create_supervisor_agent
 from app.services.chat_history_service import ChatHistoryService
 
@@ -55,7 +54,6 @@ class MultiAgentService:
 
     def __init__(self):
         self._supervisor = None
-        self._memory_manager: Optional[HybridMemoryManager] = None
         self._cron_service = None
         self._firestore_client = None
         self._chat_history: Optional[ChatHistoryService] = None
@@ -83,9 +81,7 @@ class MultiAgentService:
             return
         
         db = self._firestore_client or get_db()
-        self._memory_manager = HybridMemoryManager(firestore_client=db)
         self._supervisor = create_supervisor_agent(
-            memory_manager=self._memory_manager,
             cron_service=self._cron_service,
             firestore_client=db,
             user_id=user_id,
@@ -255,6 +251,94 @@ class MultiAgentService:
         logger.info(f"[SUPERVISOR] Stream completed for thread {thread_id} - {token_count} tokens")
         yield json.dumps({"type": "done"})
 
+    async def _stream_and_save(
+        self,
+        input_data: Any,
+        config: dict,
+        thread_id: str,
+        user_id: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Wraps _stream_graph and persists every event type to Firestore,
+        including interrupt (HITL) payloads and the final assembled assistant
+        message.  Both chat_stream and resume_stream delegate here so the
+        saving logic only lives in one place.
+        """
+        assistant_content: List[str] = []
+
+        async for event_json in self._stream_graph(input_data, config, thread_id):
+            if self._chat_history and user_id:
+                try:
+                    event_data = json.loads(event_json)
+                    etype = event_data.get("type")
+
+                    if etype == "token":
+                        assistant_content.append(event_data.get("content", ""))
+
+                    elif etype == "tool_call":
+                        await self._chat_history.save_message(
+                            thread_id=thread_id,
+                            user_id=user_id,
+                            role='tool_call',
+                            content=f"Calling {event_data.get('name', 'unknown')}",
+                            agent=event_data.get("name"),
+                            tool_args=event_data.get("args"),
+                            tool_call_id=event_data.get("tool_call_id"),
+                            node=event_data.get("node"),
+                        )
+
+                    elif etype == "tool_result":
+                        await self._chat_history.save_message(
+                            thread_id=thread_id,
+                            user_id=user_id,
+                            role='tool_result',
+                            content=event_data.get("content", ""),
+                            agent=event_data.get("name"),
+                            tool_call_id=event_data.get("tool_call_id"),
+                            node=event_data.get("node"),
+                        )
+
+                    elif etype == "agent_status":
+                        await self._chat_history.save_message(
+                            thread_id=thread_id,
+                            user_id=user_id,
+                            role='agent_status',
+                            content=f"Agent: {event_data.get('node', 'unknown')}",
+                            node=event_data.get("node"),
+                            metadata={'namespace': event_data.get("namespace")},
+                        )
+
+                    elif etype == "interrupt":
+                        # Persist the HITL card so it survives a page refresh.
+                        # interrupt_data is stored in metadata so the frontend
+                        # can reconstruct the approval card from history.
+                        await self._chat_history.save_message(
+                            thread_id=thread_id,
+                            user_id=user_id,
+                            role='hitl',
+                            content='Approval required for monitoring configuration',
+                            metadata={'interrupt_data': event_data.get("data", [])},
+                        )
+
+                except Exception as e:
+                    logger.error(f"Failed to save event to Firestore: {e}")
+
+            yield event_json
+
+        # Flush final assembled assistant message
+        if self._chat_history and user_id and assistant_content:
+            try:
+                final_content = "".join(assistant_content)
+                if final_content.strip():
+                    await self._chat_history.save_message(
+                        thread_id=thread_id,
+                        user_id=user_id,
+                        role='assistant',
+                        content=final_content,
+                    )
+            except Exception as e:
+                logger.error(f"Failed to save assistant message to Firestore: {e}")
+
     async def chat_stream(
         self,
         message: str,
@@ -302,77 +386,15 @@ class MultiAgentService:
         # Yield metadata with thread_id
         yield json.dumps({"type": "metadata", "thread_id": thread_id})
 
-        # Track assistant message content for final save
-        assistant_content = []
-        
         config = {"configurable": {"thread_id": thread_id}}
-        
-        async for event_json in self._stream_graph(
+
+        async for event_json in self._stream_and_save(
             {"messages": [{"role": "user", "content": message}]},
             config,
             thread_id,
+            user_id=user_id,
         ):
-            # Parse event to track content
-            if self._chat_history and user_id:
-                try:
-                    event_data = json.loads(event_json)
-                    
-                    # Track assistant tokens
-                    if event_data.get("type") == "token":
-                        assistant_content.append(event_data.get("content", ""))
-                    
-                    # Save intermediate events (tool_call, tool_result) immediately
-                    elif event_data.get("type") == "tool_call":
-                        await self._chat_history.save_message(
-                            thread_id=thread_id,
-                            user_id=user_id,
-                            role='tool_call',
-                            content=f"Calling {event_data.get('name', 'unknown')}",
-                            agent=event_data.get("name"),
-                            tool_args=event_data.get("args"),
-                            tool_call_id=event_data.get("tool_call_id"),
-                            node=event_data.get("node")
-                        )
-                    
-                    elif event_data.get("type") == "tool_result":
-                        await self._chat_history.save_message(
-                            thread_id=thread_id,
-                            user_id=user_id,
-                            role='tool_result',
-                            content=event_data.get("content", ""),
-                            agent=event_data.get("name"),
-                            tool_call_id=event_data.get("tool_call_id"),
-                            node=event_data.get("node")
-                        )
-                    
-                    elif event_data.get("type") == "agent_status":
-                        await self._chat_history.save_message(
-                            thread_id=thread_id,
-                            user_id=user_id,
-                            role='agent_status',
-                            content=f"Agent: {event_data.get('node', 'unknown')}",
-                            node=event_data.get("node"),
-                            metadata={'namespace': event_data.get("namespace")}
-                        )
-                    
-                except Exception as e:
-                    logger.error(f"Failed to save event to Firestore: {e}")
-            
             yield event_json
-        
-        # Save final assistant message
-        if self._chat_history and user_id and assistant_content:
-            try:
-                final_content = "".join(assistant_content)
-                if final_content.strip():
-                    await self._chat_history.save_message(
-                        thread_id=thread_id,
-                        user_id=user_id,
-                        role='assistant',
-                        content=final_content
-                    )
-            except Exception as e:
-                logger.error(f"Failed to save assistant message to Firestore: {e}")
 
     async def resume(
         self,
@@ -408,10 +430,26 @@ class MultiAgentService:
         resume_payload = self._build_resume_payload(decisions)
         config = {"configurable": {"thread_id": thread_id}}
 
-        async for event_json in self._stream_graph(
+        # Persist the user's HITL decision before streaming the result so that
+        # on page refresh the approval card is shown in its resolved state.
+        if self._chat_history and user_id and decisions:
+            try:
+                decision_type = decisions[0].get("type", "approve") if decisions else "approve"
+                await self._chat_history.save_message(
+                    thread_id=thread_id,
+                    user_id=user_id,
+                    role='hitl_resolution',
+                    content=f"HITL decision: {decision_type}",
+                    metadata={'decisions': decisions, 'decision_type': decision_type},
+                )
+            except Exception as e:
+                logger.error(f"Failed to save HITL resolution: {e}")
+
+        async for event_json in self._stream_and_save(
             Command(resume=resume_payload),
             config,
             thread_id,
+            user_id=user_id,
         ):
             yield event_json
 

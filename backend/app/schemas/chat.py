@@ -2,22 +2,6 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 
 
-class ChatMessage(BaseModel):
-    """Individual chat message"""
-    role: Literal["user", "assistant", "system"]
-    content: str
-
-
-class ChatRequest(BaseModel):
-    """Request model for chat endpoint"""
-    message: str = Field(..., min_length=1, max_length=5000, description="User message")
-    conversation_history: Optional[List[ChatMessage]] = Field(
-        default=None,
-        description="Previous messages in the conversation for context"
-    )
-    user_id: Optional[str] = Field(default=None, description="User ID for personalization")
-
-
 class AgentChatRequest(BaseModel):
     """Request model for agent chat endpoint (multi-agent system)."""
     message: str = Field(..., min_length=1, max_length=5000, description="User message")
@@ -25,23 +9,11 @@ class AgentChatRequest(BaseModel):
     user_id: Optional[str] = Field(default=None, description="Firebase user ID")
 
 
-class ChatResponse(BaseModel):
-    """Response model for chat endpoint"""
-    message: str = Field(..., description="AI assistant response")
-    conversation_id: Optional[str] = Field(default=None, description="Conversation ID")
-
-
 class AgentChatResponse(BaseModel):
     """Response model for agent chat endpoint."""
     message: str = Field(..., description="AI assistant response")
     thread_id: str = Field(..., description="Thread ID for conversation continuity")
     agent: Optional[str] = Field(default=None, description="Agent that handled the request")
-
-
-class ChatStreamChunk(BaseModel):
-    """Streaming response chunk"""
-    content: str
-    done: bool = False
 
 
 class HITLDecision(BaseModel):

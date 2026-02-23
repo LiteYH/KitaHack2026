@@ -1,33 +1,31 @@
 """
-Competitor Monitoring Agent.
+Competitor Monitoring Agent (Subagent).
 
-Uses LangChain 1.0 `create_agent` with:
-- Google Gemini as the LLM
-- Tavily search tools for competitor research
-- Agent Skills for domain expertise (progressive disclosure)
-- HumanInTheLoopMiddleware for monitoring config approval (Phase 2)
-- InMemorySaver for thread-level checkpoints
+Specialized agent for competitor research, analysis, and continuous monitoring.
+Invoked as a tool by the supervisor agent.
 
-Phase 1: Basic search + analysis (no HITL, no GenUI).
-Phase 2: Add HITL approval flow.
-Phase 3: Add cron job execution.
-Phase 4: Add GenUI rich responses.
+Capabilities:
+- Web search via Tavily (search_competitor, search_competitor_news)
+- Monitoring CRUD with HITL approval (create/update/check monitoring configs)
+- Skill-based progressive disclosure (search, analysis, GenUI skills)
+- Summarization middleware for long conversations
 """
 
 from pathlib import Path
 from typing import Optional
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import HumanInTheLoopMiddleware, SummarizationMiddleware
+from langchain.agents.middleware import SummarizationMiddleware
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.core.config import settings
-from app.core.competitor_agent_memory import HybridMemoryManager
 
 from .skills import SkillLoader, SkillMiddleware
 from .tools import (
     create_monitoring_config,
+    check_user_competitors,
+    update_monitoring_config,
     search_competitor,
     search_competitor_news,
 )
@@ -38,7 +36,6 @@ SKILLS_DIR = Path(__file__).parent / "skills"
 
 
 def create_competitor_monitoring_agent(
-    memory_manager: Optional[HybridMemoryManager] = None,
     cron_service=None,
     firestore_client=None,
     user_id: Optional[str] = None,
@@ -46,13 +43,17 @@ def create_competitor_monitoring_agent(
     """
     Create the competitor monitoring agent.
 
+    This agent is designed to be invoked as a tool by the supervisor.
+    It has its own InMemorySaver for the agent loop to function with
+    middleware; the supervisor uses a unique thread_id per invocation
+    to keep each call stateless.
+
     Args:
-        memory_manager: Optional memory manager for cross-thread memory
         cron_service: CronService instance for creating monitoring jobs
         firestore_client: Firestore client for saving configurations
         user_id: User ID for the current session
 
-    Returns a compiled LangGraph agent that can be invoked or streamed.
+    Returns a compiled LangGraph agent.
     """
     import logging
     logger = logging.getLogger(__name__)
@@ -62,13 +63,16 @@ def create_competitor_monitoring_agent(
     # Inject services into tools
     set_monitoring_services(cron_service, firestore_client, user_id)
     # ── LLM ──────────────────────────────────────────────────────────
+    # NOTE: Do NOT call model.bind_tools([{"google_search": {}}]) here.
+    # The agent has dedicated Tavily search tools (search_competitor,
+    # search_competitor_news). Binding google_search as a Gemini native
+    # tool causes the model to call it instead of the agent's tools,
+    # and since google_search isn't registered in the agent's tool list,
+    # the tools node can't execute it — resulting in an empty response.
     model = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model="gemini-3-flash-preview",
         google_api_key=settings.google_api_key,
         temperature=0.3,
-    )
-    model = model.bind_tools(
-        [{"google_search":{}}]
     )
 
     # ── Skills (progressive disclosure via middleware) ──────────────
@@ -78,40 +82,28 @@ def create_competitor_monitoring_agent(
         skill_names=["competitor_search", "competitor_analysis", "generative_ui"]
     )
 
-    # ── Human-in-the-Loop Middleware (Phase 2) ──────────────────────
-    logger.info(f"[COMPETITOR_AGENT] Configuring HITL middleware...")
-    hitl_middleware = HumanInTheLoopMiddleware(
-        interrupt_on={
-            "create_monitoring_config": {
-                "allowed_decisions": ["approve", "edit", "reject"],
-                "description": "Monitoring configuration requires approval before activation"
-            },
-            # Auto-approve search tools
-            "search_competitor": False,
-            "search_competitor_news": False,
-        },
-        description_prefix="Monitoring setup pending approval",
-    )
-    logger.info(f"[COMPETITOR_AGENT] ✅ HITL middleware configured:")
-    logger.info(f"[COMPETITOR_AGENT]   - create_monitoring_config: HITL enabled")
-    logger.info(f"[COMPETITOR_AGENT]   - search_competitor: auto-approved")
-    logger.info(f"[COMPETITOR_AGENT]   - search_competitor_news: auto-approved")
-
     # ── Summarization Middleware (Memory Management) ────────────────
     # Automatically condense conversation history when approaching token limits
     # This keeps recent messages intact while compressing older context
     # trigger/keep must be ContextSize tuples: ("tokens", N), ("messages", N), or ("fraction", F)
     summarization_middleware = SummarizationMiddleware(
         model="google_genai:gemini-2.5-flash",  # google_genai: prefix required
-        trigger=("tokens", 8000),   # Trigger at 8k tokens (~20% of context)
+        trigger=("tokens", 80000),   # Trigger at 8k tokens (~20% of context)
         keep=("messages", 15),      # Keep last 15 messages for immediate context
     )
+
+    # NOTE: HumanInTheLoopMiddleware intentionally removed.
+    # HITL is now handled directly inside the monitoring tools via langgraph.types.interrupt().
+    # This ensures GraphInterrupt propagates correctly through the nested ainvoke() call
+    # in the supervisor's competitor_monitoring tool wrapper.
 
     # ── Tools ────────────────────────────────────────────────────────
     tools = [
         search_competitor,
         search_competitor_news,
         create_monitoring_config,
+        check_user_competitors,
+        update_monitoring_config,
     ]
 
     # ── System prompt ────────────────────────────────────────────────
@@ -209,6 +201,45 @@ Step 4: Wrap it with text explanation
 - Search for time-sensitive information
 - Look for impactful developments (launches, pivots, partnerships)
 
+### check_user_competitors
+**When to use:**
+- User asks "what am I monitoring?" or "show my competitors"
+- Before updating a config (to get the config_id)
+- User wants to check monitoring status (active/paused)
+- User says: "list my monitors", "what's being tracked"
+
+**How to use:**
+- Simply call without arguments - it returns all user's monitoring configs
+- Use the returned config_id when you need to update or manage a specific monitor
+- **IMPORTANT:** After calling this tool, you MUST format the results into a clear, readable message
+- Present the information in a clear, organized format
+
+**Example workflow:**
+```
+User: "What am I monitoring?"
+1. Call check_user_competitors()
+2. Receive the tool result (dict with total_configs, active_count, paused_count, competitors list)
+3. Format it clearly:
+   "You're currently monitoring 3 competitors:
+   
+   🟢 Nike (Active)
+   - Status: Running
+   - Frequency: Every 6 hours
+   - Aspects: news, products
+   - Next run: in 2 hours
+   
+   ⏸️ Adidas (Paused)
+   - Status: Paused
+   - Frequency: Daily
+   - Aspects: pricing, social
+   
+   🟢 Puma (Active)
+   - Status: Running
+   - Frequency: Every 12 hours
+   - Aspects: news, products, pricing
+   - Next run: in 8 hours"
+```
+
 ### create_monitoring_config
 **When to use:**
 - User wants to "monitor", "track", or "watch" a competitor over time
@@ -219,9 +250,78 @@ Step 4: Wrap it with text explanation
 - Get all required info first (competitor, aspects, frequency, notification_level)
 - Use 24-hour intervals for daily, 168 for weekly
 - Default to `significant_only` notifications unless user wants all updates
-- This triggers approval - explain what you're setting up
+- **HITL is handled INSIDE the tool** — the graph pauses for approval before the tool
+  returns. When the tool returns `status: 'active'` the job is already live.
+  Immediately confirm to the user — do NOT ask them to approve again.
+- **When the tool returns `status: 'rejected'`**, apply ReAct reasoning on `rejection_reason`:
+
+  **Step 1 — Read the feedback carefully.** The `rejection_reason` is the human's explanation
+  of WHY they rejected the action. It is NOT necessarily a direct command to execute verbatim.
+
+  **Step 2 — Classify the feedback** into one of these cases:
+
+  | Case | Feedback pattern | What it means | Your action |
+  |------|-----------------|---------------|-------------|
+  | **A. Clear redirect** | "I want to delete Nike instead", "monitor Adidas not Samsung" | User corrects the target/action | Immediately execute the corrected action |
+  | **B. Wrong target** | "wrong competitor", "that's not the right one" | You picked the wrong config | Ask: "Which competitor did you mean?" |
+  | **C. Wrong action** | "don't delete, pause it", "I said pause not delete" | You used the wrong action | Correct the action on the same config |
+  | **D. Abort / changed mind** | "wrong request", "never mind", "cancel", "forget it" | User no longer wants this at all | Acknowledge and stop. Ask what they'd like to do instead |
+  | **E. Compound feedback** | "pause another active competitor, wrong request" | Multiple signals mixed | Parse ALL parts: abort current intent AND infer if there's a new request |
+  | **F. Ambiguous** | Vague text that could mean multiple things | Unclear intent | Ask a single clarifying question |
+
+  **Step 3 — Act based on classification:**
+  - Cases A, C: Proceed with the corrected tool call immediately
+  - Cases B, F: Ask a short, targeted clarifying question
+  - Case D: Acknowledge the abort, then ask "What would you like to do?"
+  - Case E: Acknowledge the abort of the current action, then address any new intent in the feedback
+
+  **Never** just repeat that the action was rejected without reasoning about what to do next.
+
+### update_monitoring_config
+**When to use:**
+- User wants to change monitoring frequency ("check Nike every hour instead")
+- User wants to add/remove monitoring aspects ("stop tracking pricing, add social")
+- User wants to change notification settings
+- User wants to pause or resume monitoring ("pause Nike", "resume Adidas")
+- User wants to delete monitoring ("delete Nike monitoring", "stop tracking Adidas")
+
+**How to use:**
+- First call `check_user_competitors` to get the config_id
+- Then call `update_monitoring_config` with the config_id and changes
+- Use `action="pause"` or `action="resume"` for pausing/resuming
+- Use `action="delete"` for deleting monitoring configuration
+- **HITL is handled INSIDE the tool** — the graph pauses for approval before the tool
+  returns. When the tool returns `status: 'updated'` or `status: 'deleted'`, the change
+  is already applied. Immediately confirm to the user — do NOT ask them to approve again.
+- **When the tool returns `status: 'rejected'`**, apply ReAct reasoning on `rejection_reason`:
+
+  **Step 1 — Read the feedback carefully.** The `rejection_reason` is the human's explanation
+  of WHY they rejected the action. It is NOT necessarily a direct command to execute verbatim.
+
+  **Step 2 — Classify the feedback** into one of these cases:
+
+  | Case | Feedback pattern | What it means | Your action |
+  |------|-----------------|---------------|-------------|
+  | **A. Clear redirect** | "I want to delete Nike", "do this to Samsung instead" | User unambiguously redirects to a different action or target | Execute the corrected action immediately |
+  | **B. Wrong target** | "wrong competitor", "not that one" | You resolved the wrong config | Ask: "Which competitor did you mean?" |
+  | **C. Wrong action** | "don't delete, just pause", "I said pause not delete" | Wrong action on the right config | Correct the action type on the same config |
+  | **D. Abort / changed mind** | "wrong request", "cancel", "never mind", "forget it" | User cancels the entire intent | Acknowledge gracefully and ask what they'd like to do instead |
+  | **E. Compound feedback** | "pause another active competitor, wrong request" | Abort + possible new intent | Acknowledge the abort; if a new intent is present and clear, address it; if ambiguous, ask one question |
+  | **F. Ambiguous** | Text that maps to multiple possible meanings | Unclear | Ask a single, targeted clarifying question — do not guess |
+
+  **Step 3 — Act based on classification:**
+  - Cases A, C: Proceed with corrected tool call immediately
+  - Cases B, F: Ask one precise clarifying question
+  - Case D: Acknowledge abort, ask what they'd like to do
+  - Case E: Acknowledge abort of current action; only proceed if the new intent in the feedback is unambiguous, otherwise ask
+
+  **Never** blindly execute the literal text of the feedback as a command.
+  **Never** just apologize and stop — always move the conversation forward.
 
 ## 📋 Response Format & Quality Standards
+
+**⚠️ CRITICAL: After calling ANY tool, you MUST format the tool result into a proper response message!**
+**Never end your response immediately after calling a tool. Always present the results to the user.**
 
 ### Structure Every Response Like This:
 
@@ -509,27 +609,31 @@ User Request → Load Relevant Skills → Use Tools → Create GenUI → Provide
 **Remember: A skilled agent is a successful agent. Load your skills!**
 """
 
-    # ── Checkpointer (thread-level persistence) ──────────────────────
-    checkpointer = (
-        memory_manager.checkpointer if memory_manager else InMemorySaver()
-    )
+    # ── Checkpointer ─────────────────────────────────────────────────
+    # The subagent needs its own InMemorySaver for the agent loop to
+    # work correctly with middleware (HITL, Summarization, Skills).
+    # Without a checkpointer, middleware can prevent tool execution.
+    #
+    # To avoid stale checkpoint contamination, the supervisor passes a
+    # UNIQUE thread_id (uuid4) for each invocation. This ensures the
+    # subagent always starts fresh and never resumes from old state.
+    #
+    # For HITL: GraphInterrupt propagates to the supervisor's checkpointer.
+    # On resume, the supervisor re-runs the tool → new uuid → subagent
+    # starts fresh → reaches interrupt() → LangGraph forwards the resume.
+    checkpointer = InMemorySaver()
 
     # ── Build agent ──────────────────────────────────────────────────
-    logger.info(f"[COMPETITOR_AGENT] Building agent with:")
-    logger.info(f"[COMPETITOR_AGENT]   - Model: gemini-2.5-flash")
-    logger.info(f"[COMPETITOR_AGENT]   - Tools: {len(tools)} tools")
-    logger.info(f"[COMPETITOR_AGENT]   - Middleware: 3 (skill, summarization, HITL)")
-    logger.info(f"[COMPETITOR_AGENT]   - Checkpointer: {type(checkpointer).__name__}")
+    logger.info(f"[COMPETITOR_AGENT] Building agent with {len(tools)} tools, 2 middleware")
     
     agent = create_agent(
         model=model,
         tools=tools,
         system_prompt=system_prompt,
-        middleware=[skill_middleware, summarization_middleware, hitl_middleware],
+        middleware=[skill_middleware, summarization_middleware],
         checkpointer=checkpointer,
         name="competitor_monitoring",
     )
     
-    logger.info(f"[COMPETITOR_AGENT] ✅ Competitor monitoring agent created successfully")
-
+    logger.info(f"[COMPETITOR_AGENT] ✅ Agent created for user: {user_id}")
     return agent

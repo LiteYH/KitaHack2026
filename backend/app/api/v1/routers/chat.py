@@ -238,8 +238,7 @@ async def get_chat_messages(
 @router.get("/history/{thread_id}")
 async def get_thread_history(
     thread_id: str,
-    user_id: str = Depends(get_current_user_id),
-    limit: int = Query(100, description="Maximum number of messages to return")
+    user_id: str = Depends(get_current_user_id)
 ):
     """
     Get chat history for a specific thread.
@@ -250,7 +249,6 @@ async def get_thread_history(
     Args:
         thread_id: Thread/conversation ID
         user_id: Current user's ID (from auth token)
-        limit: Maximum number of messages to return
     
     Returns:
         List of messages ordered by timestamp (oldest first)
@@ -262,7 +260,7 @@ async def get_thread_history(
         messages = await multi_agent_service._chat_history.get_thread_messages(
             thread_id=thread_id,
             user_id=user_id,
-            limit=limit
+            # limit=limit
         )
         
         logger.info(f"Retrieved {len(messages)} messages from thread {thread_id} for user {user_id}")

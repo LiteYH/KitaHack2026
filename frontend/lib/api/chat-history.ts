@@ -15,7 +15,7 @@ export interface ChatHistoryMessage {
   id: string;
   thread_id: string;
   user_id: string;
-  role: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'agent_status' | 'system';
+  role: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'agent_status' | 'hitl' | 'hitl_resolution' | 'system';
   content: string;
   timestamp?: string;
   created_at: string;
@@ -40,27 +40,32 @@ export interface ClearThreadResponse {
  * Retrieves all messages from Firestore to restore a conversation.
  */
 export async function loadThreadHistory(
-  threadId: string,
-  limit: number = 100
+  threadId: string
 ): Promise<ChatHistoryMessage[]> {
   try {
+    console.log(`[API] Loading history for thread ${threadId}`);
     const headers = await getAuthHeaders();
-    const response = await fetch(
-      `${API_V1_URL}/chat/history/${threadId}?limit=${limit}`,
-      {
-        method: 'GET',
-        headers,
-      }
-    );
+    const url = `${API_V1_URL}/chat/history/${threadId}`;
+    console.log(`[API] Fetching from ${url}`);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+    });
+
+    console.log(`[API] Response status: ${response.status} ${response.statusText}`);
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[API] Error response:`, errorText);
       throw new Error(`Failed to load history: ${response.statusText}`);
     }
 
     const messages = await response.json();
+    console.log(`[API] Received ${messages.length} messages for thread ${threadId}`);
     return messages;
   } catch (error) {
-    console.error(`[HISTORY] Failed to load thread ${threadId}:`, error);
+    console.error(`[API] Failed to load thread ${threadId}:`, error);
     throw error;
   }
 }

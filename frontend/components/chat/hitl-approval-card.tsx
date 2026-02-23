@@ -65,6 +65,12 @@ export function HITLApprovalCard({ interruptData, onDecision, className }: HITLA
 
   const primaryRequest = actionRequests[0];
   const config = primaryRequest.args || {};
+  const actionName = primaryRequest.action || primaryRequest.name || '';
+  
+  // Detect if this is an update or delete action
+  const isUpdate = actionName === 'update_monitoring_config';
+  const isDelete = config.action === 'delete';
+  const isPauseResume = config.action === 'pause' || config.action === 'resume';
 
   const handleApprove = () => {
     const decisions: HITLDecision[] = actionRequests.map((req) => ({
@@ -119,16 +125,43 @@ export function HITLApprovalCard({ interruptData, onDecision, className }: HITLA
         <CardHeader>
           <div className="flex items-start justify-between">
             <div className="space-y-1">
-              <CardTitle className="text-lg">Approval Required</CardTitle>
+              <CardTitle className="text-lg">
+                {isDelete ? 'Delete Confirmation Required' : isPauseResume ? `${config.action === 'pause' ? 'Pause' : 'Resume'} Monitoring` : 'Approval Required'}
+              </CardTitle>
               <CardDescription>
-                {primaryRequest.description || 'Monitoring configuration requires your approval'}
+                {isDelete 
+                  ? `You are about to delete the monitoring configuration for ${config.competitor || 'this competitor'}`
+                  : isPauseResume 
+                    ? `${config.action === 'pause' ? 'Pause' : 'Resume'} monitoring for ${config.competitor || 'this competitor'}`
+                    : primaryRequest.description || 'Monitoring configuration requires your approval'}
               </CardDescription>
             </div>
-            <Badge variant="secondary">Pending</Badge>
+            <Badge variant={isDelete ? "destructive" : "secondary"}>
+              {isDelete ? 'Delete' : isPauseResume ? (config.action === 'pause' ? 'Pause' : 'Resume') : 'Pending'}
+            </Badge>
           </div>
         </CardHeader>
         
         <CardContent className="space-y-4">
+          {/* Config ID for updates */}
+          {isUpdate && config.config_id && (
+            <div>
+              <Label className="text-sm font-semibold">Configuration ID</Label>
+              <p className="text-xs text-muted-foreground font-mono">{config.config_id}</p>
+            </div>
+          )}
+
+          {/* Show changes for updates */}
+          {isUpdate && config.changes && config.changes.length > 0 && (
+            <div>
+              <Label className="text-sm font-semibold">Proposed Changes</Label>
+              <ul className="mt-1 space-y-1">
+                {config.changes.map((change: string, idx: number) => (
+                  <li key={idx} className="text-sm text-muted-foreground">• {change}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {/* Competitor Name */}
           {config.competitor && (
             <div>
@@ -151,7 +184,7 @@ export function HITLApprovalCard({ interruptData, onDecision, className }: HITLA
             </div>
           )}
 
-          {/* Frequency */}
+          {/* Frequency (create flow) */}
           {config.frequency_label && (
             <div>
               <Label className="text-sm font-semibold">Frequency</Label>
@@ -159,13 +192,19 @@ export function HITLApprovalCard({ interruptData, onDecision, className }: HITLA
             </div>
           )}
 
-          {/* Cost Estimate */}
-          {config.estimated_monthly_cost && (
+          {/* Current Frequency (update flow) */}
+          {config.current_frequency && (
             <div>
-              <Label className="text-sm font-semibold">Estimated Cost</Label>
-              <p className="text-sm text-muted-foreground">
-                {config.estimated_monthly_cost} ({config.estimated_runs_per_month} runs/month)
-              </p>
+              <Label className="text-sm font-semibold">Current Frequency</Label>
+              <p className="text-sm text-muted-foreground">{config.current_frequency}</p>
+            </div>
+          )}
+
+          {/* New Frequency (update flow — when changing frequency) */}
+          {config.new_frequency_label && (
+            <div>
+              <Label className="text-sm font-semibold">New Frequency</Label>
+              <p className="text-sm text-muted-foreground">{config.new_frequency_label}</p>
             </div>
           )}
 
@@ -181,18 +220,35 @@ export function HITLApprovalCard({ interruptData, onDecision, className }: HITLA
         </CardContent>
 
         <CardFooter className="flex gap-2">
-          <Button onClick={handleApprove} className="flex-1" size="sm">
-            <Check className="mr-2 h-4 w-4" />
-            Approve
-          </Button>
-          <Button onClick={handleEdit} variant="outline" className="flex-1" size="sm">
-            <Edit2 className="mr-2 h-4 w-4" />
-            Edit
-          </Button>
-          <Button onClick={handleReject} variant="destructive" className="flex-1" size="sm">
-            <X className="mr-2 h-4 w-4" />
-            Reject
-          </Button>
+          {isDelete ? (
+            <>
+              <Button onClick={handleReject} variant="outline" className="flex-1" size="sm">
+                <X className="mr-2 h-4 w-4" />
+                Cancel
+              </Button>
+              <Button onClick={handleApprove} variant="destructive" className="flex-1" size="sm">
+                <Check className="mr-2 h-4 w-4" />
+                Confirm Delete
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={handleApprove} className="flex-1" size="sm">
+                <Check className="mr-2 h-4 w-4" />
+                Approve
+              </Button>
+              {!isPauseResume && (
+                <Button onClick={handleEdit} variant="outline" className="flex-1" size="sm">
+                  <Edit2 className="mr-2 h-4 w-4" />
+                  Edit
+                </Button>
+              )}
+              <Button onClick={handleReject} variant="destructive" className="flex-1" size="sm">
+                <X className="mr-2 h-4 w-4" />
+                Reject
+              </Button>
+            </>
+          )}
         </CardFooter>
       </Card>
 
