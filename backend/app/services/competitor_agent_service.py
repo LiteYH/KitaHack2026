@@ -61,7 +61,7 @@ class CompetitorAgentService:
         """
         self._ensure_init()
 
-        result = self._agent.invoke(
+        result = await self._agent.ainvoke(
             {"messages": [{"role": "user", "content": message}]},
             config={"configurable": {"thread_id": thread_id}},
         )
@@ -96,7 +96,7 @@ class CompetitorAgentService:
 
         config = {"configurable": {"thread_id": thread_id}}
 
-        for mode, chunk in self._agent.stream(
+        async for mode, chunk in self._agent.astream(
             {"messages": [{"role": "user", "content": message}]},
             config=config,
             stream_mode=["messages", "updates"],
@@ -153,7 +153,7 @@ class CompetitorAgentService:
 
         resume_payload = {"decisions": decisions}
 
-        result = self._agent.invoke(
+        result = await self._agent.ainvoke(
             Command(resume=resume_payload),
             config={"configurable": {"thread_id": thread_id}},
         )
@@ -182,7 +182,7 @@ class CompetitorAgentService:
         resume_payload = {"decisions": decisions}
         config = {"configurable": {"thread_id": thread_id}}
 
-        for mode, chunk in self._agent.stream(
+        async for mode, chunk in self._agent.astream(
             Command(resume=resume_payload),
             config=config,
             stream_mode=["messages", "updates"],

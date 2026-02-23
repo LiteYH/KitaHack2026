@@ -182,11 +182,14 @@ class CronService:
                 raise RuntimeError("CompetitorAgentService not initialized")
             
             # Build monitoring prompt for the agent
+            # IMPORTANT: use search-only language to avoid triggering create_monitoring_config (HITL)
             aspects_str = ", ".join(aspects) if aspects else "all aspects"
             monitoring_prompt = (
-                f"Please monitor {competitor} for {aspects_str}. "
-                f"Search for recent updates, news, product changes, pricing updates, and any significant developments. "
-                f"Provide a comprehensive summary of your findings."
+                f"Use search_competitor and search_competitor_news to research {competitor} "
+                f"focusing on these aspects: {aspects_str}. "
+                f"Find the latest updates, product changes, pricing changes, news, and any significant developments. "
+                f"Report a comprehensive summary of everything you find. "
+                f"Do NOT call create_monitoring_config or any cron job related tools or any hitl related tools, only use search tool and skills tool for this task"
             )
             
             # Create a unique thread ID for this monitoring execution

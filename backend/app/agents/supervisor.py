@@ -1,4 +1,4 @@
-"""Supervisor Agent – coordinates specialized subagents as tools."""
+﻿"""Supervisor Agent – coordinates specialized subagents as tools."""
 
 import uuid
 from typing import Optional
@@ -40,8 +40,15 @@ def create_supervisor_agent(
     # publishing_agent = create_publishing_agent()
     # etc.
     
+    # ── Subagent thread registry ─────────────────────────────────────
+    # Maps supervisor_thread_id → active subagent thread_id.
+    # A fresh UUID is assigned per user request and stored here.
+    # On HITL resume the same thread is reused so the subagent
+    # checkpoint is found. Cleared when the subagent completes.
+    _active_subagent_threads: dict = {}
+
     # ── Wrap subagents as tools ──────────────────────────────────────
-    
+
     @tool
     async def competitor_monitoring(task: str, config: RunnableConfig) -> str:
         """
@@ -107,70 +114,131 @@ def create_supervisor_agent(
         # Derive a deterministic thread from the supervisor’s thread so the
         # subagent’s checkpoint is reachable on resume.
         supervisor_thread_id = config.get("configurable", {}).get("thread_id") or str(uuid.uuid4())
-        subagent_thread = f"hitl_{supervisor_thread_id}"
-        subagent_config = {"configurable": {"thread_id": subagent_thread}}
-        logger.info(f"[SUPERVISOR→COMPETITOR] supervisor_thread={supervisor_thread_id}, subagent_thread={subagent_thread}, task={task[:200]}")
+        # ―― Dynamic thread management ―――――――――――――――――――――――――――――――
+        # Each NEW user request gets a fresh UUID so it starts with a clean
+        # InMemorySaver checkpoint (no stale ToolMessages from prior turns).
+        # During an active HITL cycle the same UUID is reused so the subagent's
+        # paused state is found on resume. Cleared when the subagent finishes.
+        existing_thread = _active_subagent_threads.get(supervisor_thread_id)
+        subagent_interrupted = False
+        subagent_interrupt_value = None
+        state = None
 
-        try:
-            # ―― Check if the subagent has a pending interrupted task ――
-            # (means we’re in the RESUME path of a previous HITL flow)
-            subagent_interrupted = False
-            subagent_interrupt_value = None
+        if existing_thread:
             try:
-                state = competitor_agent.get_state(subagent_config)
-                if state.next:  # graph is paused waiting to continue
+                state = competitor_agent.get_state({"configurable": {"thread_id": existing_thread}})
+                if state.next:  # graph is paused — we're in a HITL resume cycle
                     subagent_interrupted = True
-                    # Retrieve the interrupt payload stored by the monitoring tool
                     for pending_task in state.tasks:
                         if hasattr(pending_task, "interrupts") and pending_task.interrupts:
                             subagent_interrupt_value = pending_task.interrupts[0].value
                             break
-                    logger.info(f"[SUPERVISOR→COMPETITOR] 🔄 Subagent has pending interrupted state: {state.next}")
             except Exception as state_err:
-                logger.debug(f"[SUPERVISOR→COMPETITOR] Could not read subagent state: {state_err}")
+                logger.debug(f"[SUPERVISOR] Could not read subagent state: {state_err}")
+
+        if subagent_interrupted:
+            subagent_thread = existing_thread
+        else:
+            subagent_thread = str(uuid.uuid4())
+            _active_subagent_threads[supervisor_thread_id] = subagent_thread
+
+        subagent_config = {"configurable": {"thread_id": subagent_thread}}
+        logger.info(f"[SUPERVISOR→COMPETITOR] supervisor_thread={supervisor_thread_id}, subagent_thread={subagent_thread}, task={task[:200]}")
+
+        try:
 
             if subagent_interrupted:
-                # ―― RESUME PATH ――
-                # Surface the stored interrupt value to the supervisor graph.
-                # Because the supervisor is currently being RESUMED by the user,
-                # LangGraph will detect that lg_interrupt() is being called at the
-                # same position as the previous pause and will RETURN the decisions
-                # instead of raising again.
-                logger.info(f"[SUPERVISOR→COMPETITOR] Surfacing subagent interrupt at supervisor level for resume...")
-                decision_value = lg_interrupt(
-                    subagent_interrupt_value or {"message": "Awaiting approval to proceed with monitoring changes"}
-                )
-                logger.info(f"[SUPERVISOR→COMPETITOR] ✅ Decision received: {decision_value}")
-                # Forward the decision to the subagent using its saved checkpoint
+                # -- RESUME PATH --
+                # Exactly ONE lg_interrupt() call (pos 0 of this task execution)
+                # to receive the user's current decision, then ONE ainvoke() to
+                # forward that decision to the subagent.
+                #
+                # WHY NO LOOP:
+                # LangGraph tracks interrupt() calls by call-order position within
+                # a task execution.  Each resume turn replays positions 0..N-1 with
+                # stored decisions, delivering the NEW decision only to position N.
+                # If we call lg_interrupt() twice (pos 0 to get decision1, pos 1 to
+                # surface interrupt2), the next resume turn replays pos 0 with
+                # decision1 and sends it to interrupt2 -- causing approvals to land
+                # on the wrong action or old rejections to persist.
+                #
+                # FIX: after forwarding the decision and resuming the subagent, if
+                # the subagent hits a CHAINED interrupt we return a sentinel string
+                # instead of calling lg_interrupt() again.  The supervisor model
+                # calls competitor_monitoring once more (brand-new task, fresh pos 0)
+                # which surfaces the chained interrupt without any history baggage.
+                stored_interrupts = []
+                try:
+                    for pending_task in state.tasks:
+                        if hasattr(pending_task, "interrupts") and pending_task.interrupts:
+                            stored_interrupts.extend(pending_task.interrupts)
+                except Exception:
+                    pass
+                if not stored_interrupts:
+                    from langgraph.types import Interrupt as LGInterrupt
+                    stored_value = subagent_interrupt_value or {
+                        "message": "Awaiting approval to proceed with monitoring changes"
+                    }
+                    stored_interrupts = [LGInterrupt(value=stored_value, resumable=True, ns=[], when="during")]
+
+                first_si       = stored_interrupts[0]
+                interrupt_val_r = first_si.value if hasattr(first_si, "value") else first_si
+                interrupt_id_r  = getattr(first_si, "id", None)
+                logger.info(f"[SUPERVISOR] Resume: surfacing stored interrupt id={interrupt_id_r}")
+
+                # THE sole lg_interrupt() call for this task execution (pos 0).
+                decision = lg_interrupt(interrupt_val_r)
+                logger.info(f"[SUPERVISOR] Decision received: {decision}")
+
+                resume_payload = {interrupt_id_r: decision} if interrupt_id_r else decision
                 result = await competitor_agent.ainvoke(
-                    Command(resume=decision_value),
+                    Command(resume=resume_payload),
                     config=subagent_config,
                 )
+
+                if result.get("__interrupt__") if isinstance(result, dict) else False:
+                    # Chained interrupt: subagent needs another approval.
+                    # Do NOT call lg_interrupt() here -- doing so would be pos 1,
+                    # and future resume turns would replay this turn's decision at
+                    # pos 0 instead of awaiting the user's new input.
+                    # Return a sentinel so the supervisor model triggers a new
+                    # competitor_monitoring call (fresh task, clean pos 0).
+                    chained = result["__interrupt__"][0]
+                    cv = chained.value if hasattr(chained, "value") else {}
+                    cname = cv.get("competitor", "the competitor") if isinstance(cv, dict) else "the competitor"
+                    logger.info("[SUPERVISOR] Chained interrupt detected -- returning AWAITING_NEXT_APPROVAL (no extra lg_interrupt)")
+                    # Keep thread in _active_subagent_threads so next call can resume
+                    return (
+                        f"AWAITING_NEXT_APPROVAL: Another approval is needed for {cname}. "
+                        "Call competitor_monitoring again with the exact same original task."
+                    )
+                # Subagent completed without further interrupts -- fall through.
+
             else:
-                # ―― FRESH INVOCATION PATH ――
+                # -- FRESH INVOCATION PATH --
                 result = await competitor_agent.ainvoke(
                     {"messages": [{"role": "user", "content": task}]},
                     config=subagent_config,
                 )
 
-                # In LangGraph 1.0.x, ainvoke() RETURNS {"__interrupt__": [...]}
-                # instead of raising when a tool calls interrupt(). We must
-                # detect and re-surface it at the supervisor level.
-                if "__interrupt__" in result:
-                    interrupts = result["__interrupt__"]
-                    interrupt_value = interrupts[0].value if interrupts and hasattr(interrupts[0], "value") else interrupts[0] if interrupts else {}
-                    logger.info(f"[SUPERVISOR→COMPETITOR] ⏸️ Subagent interrupted — surfacing HITL at supervisor level")
-                    # lg_interrupt() RAISES on the first call (pauses supervisor).
-                    # On the resumed call it RETURNS the decision.
-                    decision_value = lg_interrupt(interrupt_value)
-                    logger.info(f"[SUPERVISOR→COMPETITOR] ✅ Post-interrupt decision: {decision_value}")
-                    # Forward to subagent (only reached on resume)
-                    result = await competitor_agent.ainvoke(
-                        Command(resume=decision_value),
-                        config=subagent_config,
-                    )
+                if result.get("__interrupt__") if isinstance(result, dict) else False:
+                    # Surface the first HITL interrupt.
+                    # Exactly ONE lg_interrupt() call per fresh-task execution.
+                    # No loop needed -- chained interrupts are handled turn-by-turn
+                    # via the RESUME PATH above.
+                    first_fi = result["__interrupt__"][0]
+                    iv  = first_fi.value if hasattr(first_fi, "value") else first_fi
+                    iid = getattr(first_fi, "id", None)
+                    logger.info(f"[SUPERVISOR] Fresh path: surfacing HITL id={iid}")
+                    lg_interrupt(iv)
+                    # lg_interrupt() raises here -- supervisor pauses.
+                    # Next HTTP request enters the RESUME PATH above.
 
+            # -- Subagent completed successfully (no pending interrupts) --
             logger.info(result)
+            # Subagent completed  release its thread so the next fresh request
+            # gets a clean checkpoint (no stale messages from this cycle).
+            _active_subagent_threads.pop(supervisor_thread_id, None)
 
             # Extract the final AI response
             messages = result.get("messages", []) if isinstance(result, dict) else []
