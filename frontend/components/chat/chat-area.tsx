@@ -125,12 +125,13 @@ export function ChatArea() {
         // Clear any pending approval
         setPendingApproval(null)
         
-        // Add assistant response with charts if present
+        // Add assistant response with charts and filter context if present
         const assistantMessage: Message = {
           id: crypto.randomUUID(),
           role: "assistant",
           content: response.message,
           charts: response.charts,
+          filterContext: response.filter_context,
         }
         setMessages((prev) => [...prev, assistantMessage])
       }

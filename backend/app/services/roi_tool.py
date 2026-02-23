@@ -220,12 +220,16 @@ Please provide an insightful analysis of this ROI data, directly addressing the 
                 # Fallback if model not set
                 ai_analysis = analysis_data.get('data_summary', '')
             
-            # Return structured result as JSON
+            # Return structured result as JSON with filter metadata
             result = {
                 "success": True,
                 "analysis": ai_analysis,
                 "charts": charts,
-                "tool_used": "roi_analysis"
+                "tool_used": "roi_analysis",
+                "filter_context": {
+                    "days": analysis_data.get('period_days'),
+                    "user_email": user_email
+                }
             }
             
             return json.dumps(result, indent=2)

@@ -50,7 +50,7 @@ class YouTubePDFGenerator:
         if not self.xhtml2pdf_available:
             logger.warning("xhtml2pdf not available. PDF generation will be limited.")
     
-    async def generate_youtube_report(self, user_id: Optional[str] = None, user_email: Optional[str] = None) -> Dict[str, Any]:
+    async def generate_youtube_report(self, user_id: Optional[str] = None, user_email: Optional[str] = None, days: Optional[int] = None) -> Dict[str, Any]:
         """
         Main method to generate YouTube ROI report:
         1. Analyze YouTube ROI metrics from Firestore
@@ -61,15 +61,20 @@ class YouTubePDFGenerator:
         Args:
             user_id: Optional user ID for filtering
             user_email: Optional user email for filtering (takes precedence)
+            days: Optional number of days to filter data (e.g., last 7 days)
         """
         try:
             logger.info("🚀 Starting YouTube ROI report generation...")
             
             # Step 1: Analyze YouTube ROI metrics and generate HTML
-            logger.info("📊 Step 1: Analyzing YouTube metrics and generating HTML...")
+            if days:
+                logger.info(f"📊 Step 1: Analyzing YouTube metrics and generating HTML (filtered: last {days} days)...")
+            else:
+                logger.info("📊 Step 1: Analyzing YouTube metrics and generating HTML (all time)...")
             html_content, report_data = await self.ai_agent.generate_html_report(
                 user_id=user_id, 
-                user_email=user_email
+                user_email=user_email,
+                days=days
             )
             
             if not html_content:
@@ -196,17 +201,18 @@ class YouTubePDFGenerator:
 
 
 # Standalone function for backward compatibility
-async def generate_youtube_report(user_id: Optional[str] = None, user_email: Optional[str] = None) -> Dict[str, Any]:
+async def generate_youtube_report(user_id: Optional[str] = None, user_email: Optional[str] = None, days: Optional[int] = None) -> Dict[str, Any]:
     """
     Standalone function to generate YouTube ROI report
     
     Args:
         user_id: Optional user ID for filtering
         user_email: Optional user email for filtering (takes precedence)
+        days: Optional number of days to filter data (e.g., last 7 days from chat context)
     """
     try:
         pdf_generator = YouTubePDFGenerator()
-        result = await pdf_generator.generate_youtube_report(user_id=user_id, user_email=user_email)
+        result = await pdf_generator.generate_youtube_report(user_id=user_id, user_email=user_email, days=days)
         return result
     except Exception as e:
         logger.error(f"❌ Standalone YouTube report generation failed: {str(e)}")

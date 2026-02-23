@@ -11,6 +11,7 @@ import {
   Settings,
   Search,
   TrendingUp,
+  Cable,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -20,6 +21,7 @@ const navItems = [
   { icon: ClipboardList, label: "Task", href: "/tasks" },
   { icon: Bot, label: "Ask AI", href: "/chat" },
   { icon: TrendingUp, label: "ROI", href: "/roi" },
+  { icon: Cable, label: "Platform", href: "/platform" },
   { icon: Bell, label: "Notification", href: "/notifications" },
   { icon: Settings, label: "Settings", href: "/settings" },
   { icon: Search, label: "Search", href: "/search" },

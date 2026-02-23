@@ -61,7 +61,7 @@ class YouTubeROIReportAgent:
                 logger.error(f"❌ Failed to initialize Google Generative AI: {e}")
                 self.google_genai_available = False
     
-    async def generate_html_report(self, user_id: Optional[str] = None, user_email: Optional[str] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    async def generate_html_report(self, user_id: Optional[str] = None, user_email: Optional[str] = None, days: Optional[int] = None) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
         """
         Main method to generate HTML report for YouTube ROI:
         1. Fetch YouTube ROI metrics data from Firestore
@@ -71,6 +71,7 @@ class YouTubeROIReportAgent:
         Args:
             user_id: Optional user ID to filter data
             user_email: Optional user email to filter data (takes precedence)
+            days: Optional number of days to filter data (e.g., last 7 days)
         """
         try:
             logger.info("🚀 Starting YouTube HTML report generation...")
@@ -81,8 +82,11 @@ class YouTubeROIReportAgent:
                 logger.info("📋 Using: Template-based generation (fallback)")
             
             # Step 1: Fetch YouTube ROI metrics data from Firestore
-            logger.info("📊 Step 1: Fetching YouTube ROI metrics from Firestore...")
-            youtube_data = await self._fetch_youtube_roi_data(user_id=user_id, user_email=user_email)
+            if days:
+                logger.info(f"📊 Step 1: Fetching YouTube ROI metrics from Firestore (filtered: last {days} days)...")
+            else:
+                logger.info("📊 Step 1: Fetching YouTube ROI metrics from Firestore (all time)...")
+            youtube_data = await self._fetch_youtube_roi_data(user_id=user_id, user_email=user_email, days=days)
             
             if not youtube_data or youtube_data.get('record_count', 0) == 0:
                 logger.warning("⚠️ No YouTube ROI data found, using sample data")
@@ -114,13 +118,14 @@ class YouTubeROIReportAgent:
             logger.error(f"❌ YouTube HTML report generation failed: {str(e)}")
             return None, None
     
-    async def _fetch_youtube_roi_data(self, user_id: Optional[str] = None, user_email: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    async def _fetch_youtube_roi_data(self, user_id: Optional[str] = None, user_email: Optional[str] = None, days: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         Fetch YouTube ROI metrics data from Firestore
         
         Args:
             user_id: Optional user ID for filtering
             user_email: Optional user email for filtering (takes precedence)
+            days: Optional number of days to look back (filters by publish_date)
         """
         try:
             logger.info("🔍 Fetching YouTube ROI metrics from Firestore...")
@@ -138,8 +143,20 @@ class YouTubeROIReportAgent:
             
             logger.info(f"✅ Retrieved {len(raw_data)} YouTube ROI records")
             
+            # Filter by date if days parameter is provided
+            if days is not None:
+                from datetime import datetime, timedelta
+                date_threshold = (datetime.now() - timedelta(days=days)).isoformat()
+                original_count = len(raw_data)
+                raw_data = [
+                    record for record in raw_data
+                    if record.get('publish_date', '') >= date_threshold
+                ]
+                logger.info(f"📅 Applied {days} days filter: {original_count} → {len(raw_data)} records")
+            
             # Process and structure the data
             processed_data = self._process_youtube_data(raw_data)
+            processed_data['filter_days'] = days  # Store filter context
             return processed_data
             
         except Exception as e:

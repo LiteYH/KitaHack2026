@@ -16,6 +16,10 @@ export interface Message {
   role: "user" | "assistant"
   content: string
   charts?: ChartConfig[]
+  filterContext?: {
+    days?: number
+    userEmail?: string
+  }
 }
 
 interface MessageBubbleProps {
@@ -47,12 +51,17 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         return
       }
 
-      // Download the PDF report
-      await downloadPDFReport(userEmail)
+      // Get filter context from message (days filter from chat query)
+      const days = message.filterContext?.days
+
+      // Download the PDF report with the same filters used in the chat
+      await downloadPDFReport(userEmail, days)
       
       toast({
         title: "Report Downloaded",
-        description: "Your ROI report has been downloaded successfully.",
+        description: days 
+          ? `Your ROI report for the last ${days} days has been downloaded.`
+          : "Your ROI report has been downloaded successfully.",
       })
     } catch (error) {
       console.error("Error downloading report:", error)

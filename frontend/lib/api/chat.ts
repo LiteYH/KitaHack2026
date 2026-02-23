@@ -55,6 +55,10 @@ export interface ChatResponse {
   requires_approval?: boolean;
   approval_request?: ApprovalRequest;
   thread_id?: string;
+  filter_context?: {
+    days?: number;
+    user_email?: string;
+  };
 }
 
 /**

@@ -27,21 +27,23 @@ router = APIRouter(
 @router.post("/generate")
 async def generate_report(
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
-    user_email: Optional[str] = Query(None, description="Filter by user email")
+    user_email: Optional[str] = Query(None, description="Filter by user email"),
+    days: Optional[int] = Query(None, description="Filter by number of days (e.g., last 7 days)")
 ):
     """
     Generate YouTube ROI report in multiple formats (HTML, PDF, TEXT, JSON)
     
     - **user_id**: Optional user ID to filter YouTube data
     - **user_email**: Optional user email to filter YouTube data (takes precedence over user_id)
+    - **days**: Optional number of days to filter data (e.g., 7 for last 7 days)
     
     Returns: JSON with HTML, PDF (base64), TEXT, and JSON content
     """
     try:
-        logger.info(f"📊 Generating YouTube ROI report (user_email: {user_email or 'N/A'}, user_id: {user_id or 'all'})")
+        logger.info(f"📊 Generating YouTube ROI report (user_email: {user_email or 'N/A'}, user_id: {user_id or 'all'}, days: {days or 'all time'})")
         
         # Generate report using the YouTube PDF generator
-        result = await generate_youtube_report(user_id=user_id, user_email=user_email)
+        result = await generate_youtube_report(user_id=user_id, user_email=user_email, days=days)
         
         if not result.get("success"):
             raise HTTPException(
@@ -86,20 +88,22 @@ async def generate_report(
 @router.get("/download/html")
 async def download_html_report(
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
-    user_email: Optional[str] = Query(None, description="Filter by user email")
+    user_email: Optional[str] = Query(None, description="Filter by user email"),
+    days: Optional[int] = Query(None, description="Filter by number of days (e.g., last 7 days)")
 ):
     """
     Download YouTube ROI report as HTML file
     
     - **user_id**: Optional user ID to filter YouTube data
     - **user_email**: Optional user email to filter YouTube data (takes precedence)
+    - **days**: Optional number of days to filter data (e.g., 7 for last 7 days)
     
     Returns: HTML file for download
     """
     try:
-        logger.info(f"📄 Generating YouTube HTML report for download (user_email: {user_email or 'N/A'}, user_id: {user_id or 'all'})")
+        logger.info(f"📄 Generating YouTube HTML report for download (user_email: {user_email or 'N/A'}, user_id: {user_id or 'all'}, days: {days or 'all time'})")
         
-        result = await generate_youtube_report(user_id=user_id, user_email=user_email)
+        result = await generate_youtube_report(user_id=user_id, user_email=user_email, days=days)
         
         if not result.get("success"):
             raise HTTPException(
@@ -132,20 +136,22 @@ async def download_html_report(
 @router.get("/download/pdf")
 async def download_pdf_report(
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
-    user_email: Optional[str] = Query(None, description="Filter by user email")
+    user_email: Optional[str] = Query(None, description="Filter by user email"),
+    days: Optional[int] = Query(None, description="Filter by number of days (e.g., last 7 days)")
 ):
     """
     Download YouTube ROI report as PDF file
     
     - **user_id**: Optional user ID to filter YouTube data
     - **user_email**: Optional user email to filter YouTube data (takes precedence)
+    - **days**: Optional number of days to filter data (e.g., 7 for last 7 days)
     
     Returns: PDF file for download
     """
     try:
-        logger.info(f"📄 Generating YouTube PDF report for download (user_email: {user_email or 'N/A'}, user_id: {user_id or 'all'})")
+        logger.info(f"📄 Generating YouTube PDF report for download (user_email: {user_email or 'N/A'}, user_id: {user_id or 'all'}, days: {days or 'all time'})")
         
-        result = await generate_youtube_report(user_id=user_id, user_email=user_email)
+        result = await generate_youtube_report(user_id=user_id, user_email=user_email, days=days)
         
         if not result.get("success"):
             raise HTTPException(

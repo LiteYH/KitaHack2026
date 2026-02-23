@@ -9,14 +9,18 @@ const API_V1_URL = `${API_BASE_URL}/api/v1`;
 /**
  * Download PDF report for a user
  * @param userEmail User's email to filter ROI data
+ * @param days Optional number of days to filter (e.g., 7 for last 7 days)
  * @returns Promise that resolves when download starts
  */
-export async function downloadPDFReport(userEmail?: string): Promise<void> {
+export async function downloadPDFReport(userEmail?: string, days?: number): Promise<void> {
   try {
-    // Build URL with user_email as query parameter if provided
+    // Build URL with user_email and days as query parameters if provided
     const url = new URL(`${API_V1_URL}/youtube-report/download/pdf`);
     if (userEmail) {
       url.searchParams.append('user_email', userEmail);
+    }
+    if (days !== undefined && days !== null) {
+      url.searchParams.append('days', days.toString());
     }
 
     const response = await fetch(url.toString());
@@ -54,13 +58,17 @@ export async function downloadPDFReport(userEmail?: string): Promise<void> {
 /**
  * Download HTML report for a user
  * @param userEmail User's email to filter ROI data
+ * @param days Optional number of days to filter (e.g., 7 for last 7 days)
  * @returns Promise that resolves when download starts
  */
-export async function downloadHTMLReport(userEmail?: string): Promise<void> {
+export async function downloadHTMLReport(userEmail?: string, days?: number): Promise<void> {
   try {
     const url = new URL(`${API_V1_URL}/youtube-report/download/html`);
     if (userEmail) {
       url.searchParams.append('user_email', userEmail);
+    }
+    if (days !== undefined && days !== null) {
+      url.searchParams.append('days', days.toString());
     }
 
     const response = await fetch(url.toString());
@@ -96,13 +104,17 @@ export async function downloadHTMLReport(userEmail?: string): Promise<void> {
 /**
  * Generate report and get all formats (HTML, PDF, TEXT, JSON)
  * @param userEmail User's email to filter ROI data
+ * @param days Optional number of days to filter (e.g., 7 for last 7 days)
  * @returns Report data in multiple formats
  */
-export async function generateReport(userEmail?: string): Promise<any> {
+export async function generateReport(userEmail?: string, days?: number): Promise<any> {
   try {
     const url = new URL(`${API_V1_URL}/youtube-report/generate`);
     if (userEmail) {
       url.searchParams.append('user_email', userEmail);
+    }
+    if (days !== undefined && days !== null) {
+      url.searchParams.append('days', days.toString());
     }
 
     const response = await fetch(url.toString(), {
