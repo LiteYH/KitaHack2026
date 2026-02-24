@@ -27,7 +27,7 @@ class ContentAgent:
 
         # LLM with system instruction
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash-lite",
+            model="gemini-2.5-flash",
             google_api_key=api_key,
             temperature=0.7,
         )
@@ -65,14 +65,20 @@ When users mention images/visuals/graphics, offer to generate custom images usin
         """
         # Detection keywords
         content_keywords = ['write', 'create', 'generate', 'post', 'caption', 'draft']
-        confirmation_keywords = ['yes', 'sure', 'ok', 'confirm', 'proceed', 'go ahead']
+        confirmation_keywords = ['yes', 'sure', 'ok', 'confirm', 'proceed', 'go ahead', 'please', 'do it', 'yep', 'yeah']
+        platform_keywords = ['instagram', 'facebook', 'linkedin', 'twitter', 'tiktok', 'youtube', 'pinterest']
         wants_image = should_generate_image(user_message)
         wants_content = any(kw in user_message.lower() for kw in content_keywords)
         is_confirming = any(kw in user_message.lower() for kw in confirmation_keywords)
+        is_platform_only = any(kw in user_message.lower() for kw in platform_keywords)
         
         # CASE 1: User is confirming image generation (PRIORITY CHECK)
-        # Check if we're awaiting confirmation OR if they explicitly mention image with confirmation
-        if (self.awaiting_image_confirmation and is_confirming) or (wants_image and is_confirming and len(self.chat_history) > 0):
+        # Triggers when:
+        #   a) awaiting confirmation + explicit yes/ok/sure etc.
+        #   b) awaiting confirmation + user just named a platform (e.g. "instagram")
+        #   c) explicit image + confirmation combo in mid-conversation
+        awaiting_and_responding = self.awaiting_image_confirmation and (is_confirming or is_platform_only)
+        if awaiting_and_responding or (wants_image and is_confirming and len(self.chat_history) > 0):
             # Extract platform if mentioned
             platform = self._extract_platform(user_message)
             

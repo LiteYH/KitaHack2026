@@ -14,6 +14,7 @@ from langgraph.types import interrupt as lg_interrupt
 
 from app.core.config import settings
 from app.agents.competitor_monitoring import create_competitor_monitoring_agent
+from app.services.agents.content_agent import ContentAgent
 
 
 def create_supervisor_agent(
@@ -35,10 +36,8 @@ def create_supervisor_agent(
         user_id=user_id,
     )
     
-    # TODO: Initialize other subagents as your teammates build them
-    # content_agent = create_content_planning_agent()
-    # publishing_agent = create_publishing_agent()
-    # etc.
+    # Content planning agent (stateful, reuses same instance per supervisor)
+    content_agent_instance = ContentAgent()
     
     # ── Subagent thread registry ─────────────────────────────────────
     # Maps supervisor_thread_id → active subagent thread_id.
@@ -267,23 +266,45 @@ def create_supervisor_agent(
         except Exception as e:
             logger.error(f"[SUPERVISOR→COMPETITOR] ❌ {e}", exc_info=True)
             return f"Error processing competitor monitoring request: {str(e)}"
-    # TODO: Add more subagent tools as they're built
-    # @tool
-    # def content_planning(task: str) -> str:
-    #     """Create content, plan posts, or manage content calendar."""
-    #     ...
-    
-    # @tool
-    # def publishing(task: str) -> str:
-    #     """Publish or schedule posts to social media platforms."""
-    #     ...
-    
+    @tool
+    async def content_planning(task: str) -> str:
+        """
+        Delegate content creation and social media planning tasks to the Content Planning Agent.
+
+        USE THIS TOOL when the user wants to:
+        - Write or generate social media posts, captions, or content
+        - Create marketing copy for any platform (Instagram, Facebook, LinkedIn, TikTok, etc.)
+        - Get scheduling recommendations for posts
+        - Generate images or visuals for social media
+        - Draft content calendars or post ideas
+        - Improve or rewrite existing content
+
+        DO NOT USE this tool for:
+        - Competitor research (use competitor_monitoring instead)
+        - General marketing strategy questions (answer directly)
+
+        Args:
+            task: Clear description of the content the user wants to create, including
+                  platform, tone, topic, and any other relevant details.
+
+        Returns:
+            Generated social media content, scheduling insights, or image generation results.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[SUPERVISOR→CONTENT] task={task[:200]}")
+        try:
+            result = await content_agent_instance.run(task)
+            logger.info(f"[SUPERVISOR→CONTENT] ✅ {len(result)} chars")
+            return result
+        except Exception as e:
+            logger.error(f"[SUPERVISOR→CONTENT] ❌ {e}", exc_info=True)
+            return f"Error processing content planning request: {str(e)}"
+
     # Collect all subagent tools
     subagent_tools = [
         competitor_monitoring,
-        # content_planning,
-        # publishing,
-        # etc.
+        content_planning,
     ]
     
     # ── Build supervisor agent ───────────────────────────────────────
@@ -310,6 +331,8 @@ You are the SUPERVISOR that coordinates specialized agents. Your role is to:
 - **Monitoring setup** (tracking competitors over time)
 - **Competitive intelligence** (market analysis requiring fresh data)
 - **Anything requiring web search or external data**
+- **Content creation** (writing posts, captions, marketing copy, generating images)
+- **Social media scheduling** (best times to post, content calendars)
 
 ### ✅ ANSWER DIRECTLY when the user asks about:
 - **General marketing advice** (strategies, best practices, how-to guides)
@@ -357,6 +380,53 @@ User: "Compare Nike and Adidas pricing"
 → Call tool: "Research and compare current pricing strategies for Nike and Adidas athletic footwear"
 ```
 
+### content_planning
+**Use this tool when the user wants to:**
+- Write, generate, or draft social media posts, captions, or content
+- Create marketing copy for Instagram, Facebook, LinkedIn, TikTok, Twitter, Pinterest, YouTube
+- Get AI-generated images or visuals for a post
+- Receive scheduling recommendations (best time to post)
+- Build a content calendar or brainstorm post ideas
+
+**Examples:**
+```
+User: "Write an Instagram post about our new coffee blend"
+→ Call tool: "Write an engaging Instagram post about a new coffee blend product"
+
+User: "Create a LinkedIn post about our company milestone"
+→ Call tool: "Create a professional LinkedIn post celebrating a company milestone"
+
+User: "Generate a Facebook ad for our sale"
+→ Call tool: "Generate a Facebook ad post for a product sale with a strong call to action"
+
+User: "Make me a post with an image"
+→ Call tool: "Create a social media post with an image for the user's request"
+```
+
+## 🖼️ CRITICAL: Image Generation Follow-up Rule
+
+The content_planning agent has an internal **stateful image generation flow**. After generating content it sometimes offers to also create an image. When it does, the conversation is NOT finished — the agent is waiting for confirmation.
+
+**RULE: If the PREVIOUS assistant turn called content_planning AND the result contained the phrase "Image Generation Available" or asked about generating an image, then ANY follow-up message from the user (no matter how short: "yes", "no", "instagram", "facebook", etc.) MUST be forwarded VERBATIM to the content_planning tool. NEVER answer those follow-ups yourself.**
+
+```
+Previous content_planning result included "🎨 Image Generation Available!"
+
+User: "yes"
+→ DO NOT answer directly. Call tool: "yes"
+
+User: "instagram"
+→ DO NOT answer directly. Call tool: "instagram"
+
+User: "yes, instagram"
+→ DO NOT answer directly. Call tool: "yes, instagram"
+
+User: "no thanks"
+→ DO NOT answer directly. Call tool: "no thanks"
+```
+
+**If you answer these follow-ups yourself (e.g. "Great! Which platform?"), the image generation state is broken and the image will NEVER be generated.**
+
 ### General Marketing (You Handle This)
 **Answer these directly WITHOUT using tools:**
 ```
@@ -367,7 +437,7 @@ User: "How do I improve my SEO?"
 → Answer: "Here are key SEO strategies for SMEs: 1. Optimize..."
 
 User: "What can you help me with?"
-→ Answer: "I can help you with competitor research, marketing strategy..."
+→ Answer: "I can help you with competitor research, content creation, marketing strategy..."
 ```
 
 ## 📋 Response Guidelines
@@ -396,6 +466,7 @@ User: "What can you help me with?"
 3. **Maintain context** - remember previous messages in the conversation
 4. **Be helpful, not robotic** - use a friendly, professional tone
 5. **If unsure whether to delegate**, err on the side of delegating
+6. **NEVER intercept content_planning follow-ups** - if the last tool result contained "Image Generation Available", forward ALL user replies directly to content_planning without modification
 
 ## 🔄 Multi-Step Tasks
 

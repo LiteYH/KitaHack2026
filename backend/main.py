@@ -119,7 +119,9 @@ def health_check():
 app.include_router(api_router, prefix="/api/v1")
 
 # Serve generated images statically for hackathon (local development)
-app.mount("/generated_images", StaticFiles(directory="generated_images"), name="generated_images")
+_generated_images_dir = os.path.join(os.path.dirname(__file__), "generated_images")
+os.makedirs(_generated_images_dir, exist_ok=True)
+app.mount("/generated_images", StaticFiles(directory=_generated_images_dir), name="generated_images")
 
 
 if __name__ == "__main__":

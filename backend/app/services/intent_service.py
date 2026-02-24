@@ -22,7 +22,7 @@ class IntentService:
             raise ValueError("GOOGLE_API_KEY not found in environment variables. Please set it in .env file.")
         
         self.llm = ChatGoogleGenerativeAI(
-            model = "gemini-2.5-flash-lite",
+            model = "gemini-2.5-flash",
             api_key = api_key,
             temperature = 0,
         ).with_structured_output(IntentSchema)
