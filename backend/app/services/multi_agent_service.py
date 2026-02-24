@@ -194,14 +194,37 @@ class MultiAgentService:
 
                     # --- ToolMessage (result from tool execution) ---
                     if isinstance(token, ToolMessage):
-                        tool_content = self._normalize_content(token.content) if token.content else ""
-                        yield json.dumps({
+                        tool_content_full = self._normalize_content(token.content) if token.content else ""
+                        tool_name = token.name or "unknown"
+                        
+                        # For roi_analysis: extract embedded charts before truncating
+                        roi_charts = None
+                        roi_filter_context = None
+                        if tool_name == "roi_analysis" and "<roi-charts>" in tool_content_full:
+                            try:
+                                start = tool_content_full.index("<roi-charts>") + 12
+                                end = tool_content_full.index("</roi-charts>")
+                                charts_payload = json.loads(tool_content_full[start:end])
+                                roi_charts = charts_payload.get("charts")
+                                roi_filter_context = charts_payload.get("filter_context")
+                                # Strip the block from displayed content
+                                tool_content_full = tool_content_full[:tool_content_full.index("<roi-charts>")].rstrip()
+                            except Exception:
+                                pass
+                        
+                        event_payload = {
                             "type": "tool_result",
-                            "name": token.name or "unknown",
-                            "content": tool_content[:2000],  # Truncate very long results
+                            "name": tool_name,
+                            "content": tool_content_full[:2000],  # Truncate for display
                             "tool_call_id": token.tool_call_id if hasattr(token, "tool_call_id") else None,
                             "node": langgraph_node,
-                        })
+                        }
+                        if roi_charts is not None:
+                            event_payload["charts"] = roi_charts
+                        if roi_filter_context is not None:
+                            event_payload["filter_context"] = roi_filter_context
+                        
+                        yield json.dumps(event_payload)
 
                 elif mode == "updates":
                     if isinstance(chunk, dict):

@@ -66,8 +66,41 @@ const MessageBubbleComponent = ({ message }: MessageBubbleProps) => {
   const { toast } = useToast()
   const [isDownloading, setIsDownloading] = useState(false)
 
+  // Extract embedded ROI charts block from content, if present
+  const { displayContent, roiCharts, roiFilterContext } = useMemo(() => {
+    if (isUser) return { displayContent: message.content, roiCharts: undefined, roiFilterContext: undefined }
+    const raw = message.content || ''
+    const start = raw.indexOf('<roi-charts>')
+    const end = raw.indexOf('</roi-charts>')
+    if (start !== -1 && end !== -1) {
+      try {
+        const payload = JSON.parse(raw.slice(start + 12, end))
+        const cleaned = raw.slice(0, start).trimEnd()
+        return {
+          displayContent: cleaned,
+          roiCharts: payload.charts as ChartConfig[],
+          roiFilterContext: payload.filter_context as { days?: number; userEmail?: string },
+        }
+      } catch {
+        return { displayContent: raw, roiCharts: undefined, roiFilterContext: undefined }
+      }
+    }
+    return { displayContent: raw, roiCharts: undefined, roiFilterContext: undefined }
+  }, [isUser, message.content])
+
+  // Merge with any charts already set on the message prop
+  const activeCharts = roiCharts ?? message.charts
+  const activeFilterContext = roiFilterContext ?? message.filterContext
+
   // Check if this message contains ROI analysis (has charts)
-  const hasROIAnalysis = !isUser && message.charts && message.charts.length > 0
+  const hasROIAnalysis = !isUser && !!activeCharts && activeCharts.length > 0
+
+  // Parse GenUI for assistant messages - handle undefined/null content gracefully
+  // Memoize to prevent re-parsing on every render (performance optimization)
+  const segments = useMemo(
+    () => !isUser ? parseGenUI(displayContent) : null,
+    [isUser, displayContent]
+  )
 
   const handleDownloadReport = async () => {
     try {
@@ -86,7 +119,7 @@ const MessageBubbleComponent = ({ message }: MessageBubbleProps) => {
       }
 
       // Get filter context from message (days filter from chat query)
-      const days = message.filterContext?.days
+      const days = activeFilterContext?.days
 
       // Download the PDF report with the same filters used in the chat
       await downloadPDFReport(userEmail, days)
@@ -108,13 +141,6 @@ const MessageBubbleComponent = ({ message }: MessageBubbleProps) => {
       setIsDownloading(false)
     }
   }
-
-  // Parse GenUI for assistant messages - handle undefined/null content gracefully
-  // Memoize to prevent re-parsing on every render (performance optimization)
-  const segments = useMemo(
-    () => !isUser ? parseGenUI(message.content || '') : null,
-    [isUser, message.content]
-  )
 
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
@@ -163,9 +189,9 @@ const MessageBubbleComponent = ({ message }: MessageBubbleProps) => {
             })}
 
             {/* Render ROI charts if present */}
-            {message.charts && message.charts.length > 0 && (
+            {activeCharts && activeCharts.length > 0 && (
               <div className="mt-4 space-y-4">
-                {message.charts.map((chart, index) => (
+                {activeCharts.map((chart, index) => (
                   <ROIChart key={index} config={chart} />
                 ))}
               </div>
@@ -209,7 +235,8 @@ const arePropsEqual = (prevProps: MessageBubbleProps, nextProps: MessageBubblePr
   return (
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
-    prevProps.message.role === nextProps.message.role
+    prevProps.message.role === nextProps.message.role &&
+    prevProps.message.charts === nextProps.message.charts
   )
 }
 

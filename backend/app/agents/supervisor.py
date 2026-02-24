@@ -351,8 +351,12 @@ def create_supervisor_agent(
             try:
                 data = _json.loads(result_json)
                 analysis = data.get("analysis", result_json)
-                logger.info(f"[SUPERVISOR→ROI] ✅ {len(str(analysis))} chars")
-                return analysis
+                charts = data.get("charts", [])
+                filter_context = data.get("filter_context", {})
+                logger.info(f"[SUPERVISOR→ROI] ✅ {len(str(analysis))} chars, {len(charts)} charts")
+                # Embed charts as a hidden block the frontend can parse
+                charts_payload = _json.dumps({"charts": charts, "filter_context": filter_context})
+                return f"{analysis}\n\n<roi-charts>{charts_payload}</roi-charts>"
             except Exception:
                 return result_json
         except Exception as e:

@@ -51,6 +51,10 @@ export interface ChatMessage {
     decisions: HITLDecision[];
     timestamp: number;
   };
+  /** ROI charts attached to this message */
+  charts?: unknown[];
+  /** Filter context used for the ROI query */
+  filterContext?: { days?: number; userEmail?: string };
   /** Timestamp */
   timestamp: number;
 }
@@ -99,6 +103,7 @@ export function useAgentChat(userId?: string, userEmail?: string): UseAgentChatR
   const currentMessageRef = useRef<ChatMessage | null>(null);
   const currentAgentRef = useRef<string | null>(null);
   const threadIdRef = useRef<string>(threadId);
+  const pendingChartsRef = useRef<{ charts: unknown[]; filterContext?: { days?: number; userEmail?: string } } | null>(null);
 
   // Keep refs synced
   useEffect(() => { currentAgentRef.current = currentAgent; }, [currentAgent]);
@@ -308,6 +313,13 @@ export function useAgentChat(userId?: string, userEmail?: string): UseAgentChatR
             timestamp: Date.now(),
           };
           setMessages((prev) => [...prev, toolResultMsg]);
+          // Stash ROI charts so they can be attached to the next assistant message
+          if (event.name === 'roi_analysis' && event.charts && (event.charts as unknown[]).length > 0) {
+            pendingChartsRef.current = {
+              charts: event.charts as unknown[],
+              filterContext: event.filter_context,
+            };
+          }
           break;
         }
 
@@ -369,6 +381,17 @@ export function useAgentChat(userId?: string, userEmail?: string): UseAgentChatR
         }
 
         case 'done':
+          // Attach any pending ROI charts to the last assistant message
+          if (pendingChartsRef.current && currentMessageRef.current) {
+            const pending = pendingChartsRef.current;
+            currentMessageRef.current.charts = pending.charts;
+            currentMessageRef.current.filterContext = pending.filterContext;
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== currentMessageRef.current?.id);
+              return [...filtered, { ...currentMessageRef.current! }];
+            });
+            pendingChartsRef.current = null;
+          }
           setIsLoading(false);
           currentMessageRef.current = null;
           break;
@@ -416,6 +439,8 @@ export function useAgentChat(userId?: string, userEmail?: string): UseAgentChatR
         content: '',
         timestamp: Date.now(),
       };
+      // Clear any leftover pending charts from a previous turn
+      pendingChartsRef.current = null;
 
       const request: AgentChatRequest = {
         message: text,

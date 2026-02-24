@@ -118,6 +118,9 @@ export function AgentChatArea() {
                         id: msg.id,
                         role: msg.role,
                         content: msg.content,
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        charts: msg.charts as any,
+                        filterContext: msg.filterContext,
                       }}
                     />
                   )

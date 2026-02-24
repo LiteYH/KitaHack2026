@@ -59,6 +59,8 @@ export interface ToolResultEvent {
   content: string;
   tool_call_id?: string;
   node?: string;
+  charts?: unknown[];
+  filter_context?: { days?: number; userEmail?: string };
 }
 
 export interface AgentStatusEvent {
