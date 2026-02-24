@@ -15,6 +15,7 @@ from langgraph.types import interrupt as lg_interrupt
 from app.core.config import settings
 from app.agents.competitor_monitoring import create_competitor_monitoring_agent
 from app.services.agents.content_agent import ContentAgent
+from app.services.roi_tool import roi_analysis_tool
 
 
 def create_supervisor_agent(
@@ -301,12 +302,6 @@ def create_supervisor_agent(
             logger.error(f"[SUPERVISOR→CONTENT] ❌ {e}", exc_info=True)
             return f"Error processing content planning request: {str(e)}"
 
-    # Collect all subagent tools
-    subagent_tools = [
-        competitor_monitoring,
-        content_planning,
-    ]
-    
     # ── Build supervisor agent ───────────────────────────────────────
     
     model = ChatGoogleGenerativeAI(
@@ -314,6 +309,61 @@ def create_supervisor_agent(
         google_api_key=settings.google_api_key,
         temperature=0.3,
     )
+    
+    # Set model for ROI tool so it can generate AI insights
+    roi_analysis_tool.set_model(model)
+
+    @tool
+    async def roi_analysis(task: str, config: RunnableConfig) -> str:
+        """
+        Delegate ROI, revenue, video performance, and analytics queries to the ROI Analysis Agent.
+
+        USE THIS TOOL when the user asks about:
+        - ROI (Return on Investment) or profit/revenue/earnings/costs
+        - Video performance metrics (views, likes, comments, engagement, retention)
+        - Analytics or performance data insights
+        - Marketing campaign effectiveness
+        - Time-based performance queries ("last 7 days", "this month", etc.)
+        - Comparing video or content performance over time
+
+        DO NOT USE this tool for:
+        - Competitor research (use competitor_monitoring instead)
+        - Content creation (use content_planning instead)
+        - General marketing advice (answer directly)
+
+        Args:
+            task: The user's question about ROI or performance metrics, as stated.
+
+        Returns:
+            AI analysis of the user's ROI data with insights and chart data.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[SUPERVISOR→ROI] task={task[:200]}")
+        try:
+            user_email = config.get("configurable", {}).get("user_email", "")
+            result_json = await roi_analysis_tool._arun(
+                user_message=task,
+                user_email=user_email,
+            )
+            # Parse JSON result and return the analysis text
+            import json as _json
+            try:
+                data = _json.loads(result_json)
+                analysis = data.get("analysis", result_json)
+                logger.info(f"[SUPERVISOR→ROI] ✅ {len(str(analysis))} chars")
+                return analysis
+            except Exception:
+                return result_json
+        except Exception as e:
+            logger.error(f"[SUPERVISOR→ROI] ❌ {e}", exc_info=True)
+            return f"Error processing ROI analysis request: {str(e)}"
+
+    subagent_tools = [
+        competitor_monitoring,
+        content_planning,
+        roi_analysis,
+    ]
     
     system_prompt = """You are BossolutionAI, an AI-powered marketing assistant for SMEs.
 
@@ -333,6 +383,9 @@ You are the SUPERVISOR that coordinates specialized agents. Your role is to:
 - **Anything requiring web search or external data**
 - **Content creation** (writing posts, captions, marketing copy, generating images)
 - **Social media scheduling** (best times to post, content calendars)
+- **ROI / revenue / profit / costs / earnings**
+- **Video performance metrics** (views, engagement, retention, watch time)
+- **Analytics, performance data, or campaign effectiveness**
 
 ### ✅ ANSWER DIRECTLY when the user asks about:
 - **General marketing advice** (strategies, best practices, how-to guides)
@@ -427,6 +480,30 @@ User: "no thanks"
 
 **If you answer these follow-ups yourself (e.g. "Great! Which platform?"), the image generation state is broken and the image will NEVER be generated.**
 
+### roi_analysis
+**Use this tool when the user asks about:**
+- ROI (Return on Investment), revenue, profit, earnings, costs, or budget
+- Video performance metrics (views, likes, comments, shares, engagement rate)
+- Analytics or data insights for their content
+- Marketing campaign effectiveness or performance trends
+- Time-based performance queries ("last 7 days", "this month", "last week")
+- Comparing performance across videos or time periods
+
+**Examples:**
+```
+User: "What is my ROI for the last 7 days?"
+→ Call tool: "What is my ROI for the last 7 days?"
+
+User: "Show me my best performing videos this month"
+→ Call tool: "Show me my best performing videos this month"
+
+User: "How much revenue did I make last month?"
+→ Call tool: "How much revenue did I make last month?"
+
+User: "Analyze my video engagement trends"
+→ Call tool: "Analyze my video engagement trends"
+```
+
 ### General Marketing (You Handle This)
 **Answer these directly WITHOUT using tools:**
 ```
@@ -467,6 +544,7 @@ User: "What can you help me with?"
 4. **Be helpful, not robotic** - use a friendly, professional tone
 5. **If unsure whether to delegate**, err on the side of delegating
 6. **NEVER intercept content_planning follow-ups** - if the last tool result contained "Image Generation Available", forward ALL user replies directly to content_planning without modification
+7. **ALWAYS delegate ROI/performance/analytics queries** - don't guess numbers, the user's real data is in Firebase
 
 ## 🔄 Multi-Step Tasks
 

@@ -15,6 +15,7 @@ export interface AgentChatRequest {
   message: string;
   thread_id?: string;
   user_id?: string;
+  user_email?: string;
 }
 
 export interface AgentChatResponse {

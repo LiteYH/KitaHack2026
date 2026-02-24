@@ -74,7 +74,7 @@ export interface UseAgentChatReturn {
   toggleMessageCollapse: (messageId: string) => void;
 }
 
-export function useAgentChat(userId?: string): UseAgentChatReturn {
+export function useAgentChat(userId?: string, userEmail?: string): UseAgentChatReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [interrupt, setInterrupt] = useState<InterruptState | null>(null);
@@ -421,6 +421,7 @@ export function useAgentChat(userId?: string): UseAgentChatReturn {
         message: text,
         thread_id: threadIdRef.current,
         user_id: userId,
+        user_email: userEmail,
       };
 
       cleanupRef.current = streamAgentMessage(
@@ -442,7 +443,7 @@ export function useAgentChat(userId?: string): UseAgentChatReturn {
         }
       );
     },
-    [userId, processEvent]
+    [userId, userEmail, processEvent]
   );
 
   const resumeWithDecision = useCallback(

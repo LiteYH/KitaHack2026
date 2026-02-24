@@ -10,7 +10,6 @@ Provides the unified multi-agent chat endpoints:
 
 All chat requests are routed through the orchestrator → specialized agent pipeline.
 """
-
 import json
 import logging
 import uuid
@@ -79,6 +78,7 @@ async def agent_chat_stream(request: AgentChatRequest):
                 message=request.message,
                 thread_id=thread_id,
                 user_id=request.user_id,
+                user_email=request.user_email,
             ):
                 yield f"data: {data}\n\n"
             logger.info(f"✅ Stream completed - Thread: {thread_id}")

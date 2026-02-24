@@ -11,18 +11,22 @@ import {
   Settings,
   Clock,
   Search,
+  TrendingUp,
+  Cable,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const navItems = [
   { icon: Home, label: "Home", href: "/" },
-  { icon: FolderOpen, label: "Projects", href: "#" },
-  { icon: ClipboardList, label: "Task", href: "#" },
+  { icon: FolderOpen, label: "Projects", href: "/projects" },
+  { icon: ClipboardList, label: "Task", href: "/tasks" },
   { icon: Bot, label: "Ask AI", href: "/chat" },
+  { icon: TrendingUp, label: "ROI", href: "/roi" },
+  { icon: Cable, label: "Platform", href: "/platform" },
   { icon: Clock, label: "Cron Jobs", href: "/cron-jobs" },
-  { icon: Bell, label: "Notification", href: "#" },
-  { icon: Settings, label: "Settings", href: "#" },
-  { icon: Search, label: "Search", href: "#" },
+  { icon: Bell, label: "Notification", href: "/notifications" },
+  { icon: Settings, label: "Settings", href: "/settings" },
+  { icon: Search, label: "Search", href: "/search" },
 ]
 
 export function Sidebar() {
@@ -45,7 +49,7 @@ export function Sidebar() {
       <nav className="flex flex-1 flex-col items-center gap-1">
         {navItems.map((item) => {
           const Icon = item.icon
-          const isActive = item.href !== "#" && pathname.startsWith(item.href)
+          const isActive = item.href !== "/" ? pathname.startsWith(item.href) : pathname === "/"
           return (
             <Link
               key={item.label}

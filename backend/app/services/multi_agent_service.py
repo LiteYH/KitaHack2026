@@ -345,6 +345,7 @@ class MultiAgentService:
         thread_id: Optional[str] = None,
         user_id: Optional[str] = None,
         agent_name: Optional[str] = None,
+        user_email: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream chat responses with ALL intermediate events.
@@ -386,7 +387,7 @@ class MultiAgentService:
         # Yield metadata with thread_id
         yield json.dumps({"type": "metadata", "thread_id": thread_id})
 
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {"configurable": {"thread_id": thread_id, "user_email": user_email or ""}}
 
         async for event_json in self._stream_and_save(
             {"messages": [{"role": "user", "content": message}]},

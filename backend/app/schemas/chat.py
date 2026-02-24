@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict, Any
 
 
 class AgentChatRequest(BaseModel):
@@ -7,6 +7,7 @@ class AgentChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=5000, description="User message")
     thread_id: Optional[str] = Field(default=None, description="Thread ID for conversation continuity")
     user_id: Optional[str] = Field(default=None, description="Firebase user ID")
+    user_email: Optional[str] = Field(default=None, description="User email for ROI data access")
 
 
 class AgentChatResponse(BaseModel):

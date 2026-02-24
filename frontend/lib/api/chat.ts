@@ -8,16 +8,53 @@ const API_V1_URL = `${API_BASE_URL}/api/v1`;
 
 // ── Types ────────────────────────────────────────────────────────────
 
+export interface ChartConfig {
+  type: 'bar' | 'line' | 'pie' | 'area';
+  title: string;
+  data: any[];
+  xKey?: string;
+  yKey?: string;
+  yLabel?: string;
+  lines?: Array<{
+    key: string;
+    color: string;
+    label: string;
+  }>;
+}
+
+export interface ApprovalDecision {
+  thread_id: string;
+  approved: boolean;
+  tool_name?: string;
+}
+
+export interface ApprovalRequest {
+  tool_name: string;
+  tool_args: any;
+  message: string;
+  thread_id: string;
+  requires_approval: boolean;
+}
+
 export interface AgentChatRequest {
   message: string;
   thread_id?: string;
   user_id?: string;
+  user_email?: string;
+  approval_decision?: ApprovalDecision;
 }
 
 export interface AgentChatResponse {
   message: string;
   thread_id: string;
   agent?: string;
+  charts?: ChartConfig[];
+  requires_approval?: boolean;
+  approval_request?: ApprovalRequest;
+  filter_context?: {
+    days?: number;
+    user_email?: string;
+  };
 }
 
 export type StreamEventType = 'routing' | 'metadata' | 'token' | 'interrupt' | 'done' | 'error';

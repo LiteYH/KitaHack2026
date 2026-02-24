@@ -37,7 +37,7 @@ export function AgentChatArea() {
     resumeWithDecision,
     clearMessages,
     toggleMessageCollapse,
-  } = useAgentChat(user?.uid)
+  } = useAgentChat(user?.uid, user?.email ?? undefined)
 
   const showWelcome = messages.length === 0
 
