@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     # Uploads
     upload_dir: str = Field(default="temp_uploads", description="Directory for uploaded files")
 
+    image_output_dir: str = Field(
+        default="generated_images", 
+        description="Directory for AI-generated images"
+    )
+    imagen_model: str = Field(
+        default="imagen-4.0-generate-001",
+        description="Google Imagen model variant (fast-generate for cost efficiency)"
+    )
+
     class Config:
         env_file = str(Path(__file__).resolve().parents[2] / ".env")
         env_file_encoding = "utf-8"
