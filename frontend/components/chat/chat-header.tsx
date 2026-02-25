@@ -22,7 +22,9 @@ interface ChatHeaderProps {
 export function ChatHeader({ onClearMessages, messageCount = 0 }: ChatHeaderProps) {
   return (
     <header className="flex items-center justify-between border-b border-border bg-card px-6 py-3">
-      <h1 className="text-lg font-semibold text-foreground">BossolutionAI</h1>
+      <div className="flex items-center gap-3">
+        <h1 className="text-lg font-semibold text-foreground">BossolutionAI</h1>
+      </div>
       <div className="flex items-center gap-3">
         {messageCount > 0 && onClearMessages && (
           <AlertDialog>

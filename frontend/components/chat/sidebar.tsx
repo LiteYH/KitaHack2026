@@ -13,6 +13,7 @@ import {
   Search,
   TrendingUp,
   Cable,
+  BarChart2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -22,6 +23,7 @@ const navItems = [
   { icon: ClipboardList, label: "Task", href: "/tasks" },
   { icon: Bot, label: "Ask AI", href: "/chat" },
   { icon: TrendingUp, label: "ROI", href: "/roi" },
+  { icon: BarChart2, label: "Campaigns", href: "/campaigns" },
   { icon: Cable, label: "Platform", href: "/platform" },
   { icon: Clock, label: "Cron Jobs", href: "/cron-jobs" },
   { icon: Bell, label: "Notification", href: "/notifications" },

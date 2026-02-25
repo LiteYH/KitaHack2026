@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from .routers import chat_router
+from .routers import chat_router, campaigns_router
 from .routers.crons import router as crons_router
 from .routers.roi import router as roi_router
 from .routers.youtube_report import router as youtube_report_router
@@ -14,5 +14,6 @@ api_router.include_router(youtube_report_router)
 
 # Include cron jobs management router
 api_router.include_router(crons_router)
+api_router.include_router(campaigns_router)
 
 __all__ = ["api_router"]

@@ -127,6 +127,15 @@ export interface AgentResumeResponse {
   completed: boolean;
 }
 
+export interface CampaignDataAttachment {
+  type: 'analytics' | 'edit_request';
+  campaigns: any[];
+  metrics: any[];
+  summary: any;
+  intent: any;
+  show_visualization?: boolean;
+}
+
 // ── API Functions ────────────────────────────────────────────────────
 
 /**

@@ -255,7 +255,7 @@ Please provide an insightful analysis of this ROI data, directly addressing the 
             
             # Invoke the model
             response = await self.model.ainvoke(messages)
-            print(f"✅ [ORCHESTRATOR] Standard AI response generated")
+            print(f"\u2705 [ORCHESTRATOR] Standard AI response generated")
             
             return response.content, None, False, None
             
@@ -275,7 +275,7 @@ Please provide an insightful analysis of this ROI data, directly addressing the 
         Args:
             user_message: The user's input message
             conversation_history: Previous messages for context
-            user_id: Optional user ID for personalization
+            user_id: Optional user ID for personalization and data fetching
             
         Yields:
             Chunks of the AI assistant's response
@@ -284,7 +284,7 @@ Please provide an insightful analysis of this ROI data, directly addressing the 
             # Build LangChain message history
             messages: List[BaseMessage] = [self.system_message]
             
-            # Add conversation history if provided
+            # Step 3: Add conversation history if provided
             if conversation_history:
                 for msg in conversation_history:
                     if msg.role == "user":

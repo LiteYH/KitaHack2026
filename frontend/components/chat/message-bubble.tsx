@@ -11,6 +11,9 @@ import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/AuthContext"
 import { downloadPDFReport } from "@/lib/api/report"
 import { useToast } from "@/hooks/use-toast"
+import { CampaignAnalyticsCard } from "./campaign-analytics-card"
+import { CampaignVisualization } from "./campaign-visualization"
+import type { CampaignDataAttachment } from "@/lib/api/chat"
 
 export interface Message {
   id: string
@@ -21,6 +24,7 @@ export interface Message {
     days?: number
     userEmail?: string
   }
+  campaignData?: CampaignDataAttachment
 }
 
 interface MessageBubbleProps {
@@ -195,6 +199,25 @@ const MessageBubbleComponent = ({ message }: MessageBubbleProps) => {
                   <ROIChart key={index} config={chart} />
                 ))}
               </div>
+            )}
+
+            {/* Render campaign analytics card if present */}
+            {message.campaignData && (
+              <>
+                <CampaignAnalyticsCard
+                  campaigns={message.campaignData.campaigns}
+                  metrics={message.campaignData.metrics}
+                  summary={message.campaignData.summary}
+                  type={message.campaignData.type}
+                />
+                {message.campaignData.show_visualization && (
+                  <div className="mt-3">
+                    <CampaignVisualization
+                      campaigns={message.campaignData.campaigns}
+                    />
+                  </div>
+                )}
+              </>
             )}
 
             {/* Create Report button for ROI analysis messages */}

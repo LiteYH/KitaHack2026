@@ -17,6 +17,16 @@ class AgentChatResponse(BaseModel):
     agent: Optional[str] = Field(default=None, description="Agent that handled the request")
 
 
+class CampaignDataAttachment(BaseModel):
+    """Campaign data to be displayed in chat"""
+    type: Literal["analytics", "edit_request"] = "analytics"
+    campaigns: List[Dict[str, Any]]
+    metrics: List[Dict[str, Any]]
+    summary: Dict[str, Any]
+    intent: Dict[str, Any]
+    show_visualization: bool = Field(default=False, description="Whether to show visualization prompt")
+
+
 class HITLDecision(BaseModel):
     """HITL decision for a single interrupt"""
     type: Literal["approve", "edit", "reject"] = Field(..., description="Decision type")
