@@ -6,9 +6,8 @@ Usage:
     python seed_campaigns.py
 """
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from app.core.firebase import initialize_firebase
-import pytz
 
 # Initialize Firebase
 _, db = initialize_firebase()
@@ -17,18 +16,16 @@ if db is None:
     print("❌ Failed to initialize Firebase. Please check your credentials.")
     exit(1)
 
-# Define timezone
-utc8 = pytz.timezone('Asia/Singapore')  # UTC+8
+# UTC+8 offset
+utc8 = timezone(timedelta(hours=8))
 
 def parse_date(date_string):
     """
     Parse date string like "February 5, 2026 at 12:00:00 AM UTC+8" to datetime
     """
-    # Remove " UTC+8" suffix and parse
     date_part = date_string.replace(" at ", " ").replace(" UTC+8", "")
     dt = datetime.strptime(date_part, "%B %d, %Y %I:%M:%S %p")
-    # Make it timezone aware
-    return utc8.localize(dt)
+    return dt.replace(tzinfo=utc8)
 
 # Campaign data - all for the same user
 USER_ID = "DT4DNex2L1N2rZ9kPddEzqougK22"
