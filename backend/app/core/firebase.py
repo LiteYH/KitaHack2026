@@ -1,7 +1,6 @@
 import firebase_admin
 from firebase_admin import credentials, auth, firestore
 from app.core.config import settings
-import json
 from typing import Optional
 
 _app: Optional[firebase_admin.App] = None
@@ -21,6 +20,16 @@ def initialize_firebase():
             if not settings.FIREBASE_PROJECT_ID:
                 print("Warning: Firebase credentials not configured. Skipping Firebase initialization.")
                 return None, None
+            
+            # Check if Firebase is already initialized
+            try:
+                _app = firebase_admin.get_app()
+                _db = firestore.client()
+                print("✅ Using existing Firebase Admin SDK instance")
+                return _app, _db
+            except ValueError:
+                # App doesn't exist, initialize it
+                pass
             
             # Initialize with service account credentials
             cred_dict = {

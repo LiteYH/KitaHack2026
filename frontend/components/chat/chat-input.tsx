@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useState, memo, useCallback, type FormEvent } from "react"
 import { Paperclip, Mic, Send } from "lucide-react"
 
 interface ChatInputProps {
@@ -10,15 +10,22 @@ interface ChatInputProps {
   disabled?: boolean
 }
 
-export function ChatInput({ onSend, value, onChange, disabled = false }: ChatInputProps) {
+// Memoize ChatInput to prevent re-renders when parent re-renders
+const ChatInputComponent = ({ onSend, value, onChange, disabled = false }: ChatInputProps) => {
   const [isFocused, setIsFocused] = useState(false)
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = useCallback((e: FormEvent) => {
     e.preventDefault()
     if (!value.trim() || disabled) return
     onSend(value.trim())
     onChange("")
-  }
+  }, [value, disabled, onSend, onChange])
+
+  const handleFocus = useCallback(() => setIsFocused(true), [])
+  const handleBlur = useCallback(() => setIsFocused(false), [])
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    onChange(e.target.value)
+  }, [onChange])
 
   return (
     <form
@@ -38,9 +45,9 @@ export function ChatInput({ onSend, value, onChange, disabled = false }: ChatInp
       <input
         type="text"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
+        onChange={handleChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         placeholder="Type your message here"
         className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed"
         disabled={disabled}
@@ -65,3 +72,7 @@ export function ChatInput({ onSend, value, onChange, disabled = false }: ChatInp
     </form>
   )
 }
+
+// Export memoized component
+export const ChatInput = memo(ChatInputComponent)
+ChatInput.displayName = 'ChatInput'

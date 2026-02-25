@@ -85,3 +85,25 @@ async def get_optional_user(authorization: Optional[str] = Header(None)):
         
     except Exception:
         return None
+
+
+async def get_current_user_id(authorization: Optional[str] = Header(None)) -> str:
+    """
+    Dependency to get the current authenticated user's ID.
+    
+    Usage:
+        @app.get("/my-data")
+        async def get_my_data(user_id: str = Depends(get_current_user_id)):
+            return {"user_id": user_id}
+    
+    Args:
+        authorization: The Authorization header containing Bearer token
+        
+    Returns:
+        User ID (UID) as string
+        
+    Raises:
+        HTTPException: If token is missing or invalid
+    """
+    user = await get_current_user(authorization)
+    return user["uid"]

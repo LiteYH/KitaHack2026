@@ -1,0 +1,958 @@
+"""
+Cron Service for managing scheduled monitoring jobs using APScheduler.
+Syncs with Firestore for persistence and handles job lifecycle.
+"""
+import logging
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional, Dict, Any
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.jobstores.memory import MemoryJobStore
+from apscheduler.triggers.interval import IntervalTrigger
+from google.cloud import firestore
+
+from app.services.chat_history_service import ChatHistoryService
+
+logger = logging.getLogger(__name__)
+
+
+class CronService:
+    """
+    Manages scheduled monitoring jobs using APScheduler.
+    Syncs with Firestore for persistence.
+    """
+    
+    def __init__(self, firestore_client: firestore.Client, monitoring_service=None, notification_service=None, competitor_agent_service=None):
+        """
+        Initialize CronService with Firestore and optionally monitoring/notification/agent services.
+        
+        Args:
+            firestore_client: Firestore client
+            monitoring_service: MonitoringService instance (can be set later)
+            notification_service: NotificationService instance (can be set later)
+            competitor_agent_service: CompetitorAgentService instance (can be set later)
+        """
+        self.firestore = firestore_client
+        self.monitoring_service = monitoring_service
+        self.notification_service = notification_service
+        self.competitor_agent_service = competitor_agent_service
+        self.chat_history = ChatHistoryService(firestore_client)
+        
+        # Configure APScheduler with in-memory jobstore
+        # Note: Jobs will not persist across server restarts
+        # For production, consider using a Redis jobstore or refactoring to use standalone task functions
+        jobstores = {
+            'default': MemoryJobStore()
+        }
+        
+        self.scheduler = AsyncIOScheduler(jobstores=jobstores)
+        self._scheduler_started = False
+        logger.info("APScheduler initialized (not started yet)")
+    
+    async def start(self):
+        """Start the scheduler. Must be called in an async context with a running event loop."""
+        if not self._scheduler_started:
+            self.scheduler.start()
+            self._scheduler_started = True
+            logger.info("APScheduler started successfully with in-memory job store")
+    
+    def set_monitoring_service(self, monitoring_service):
+        """Set the monitoring service (used to break circular dependencies)"""
+        self.monitoring_service = monitoring_service
+    
+    def set_notification_service(self, notification_service):
+        """Set the notification service (used to break circular dependencies)"""
+        self.notification_service = notification_service
+    
+    def set_competitor_agent_service(self, competitor_agent_service):
+        """Set the competitor agent service (used to break circular dependencies)"""
+        self.competitor_agent_service = competitor_agent_service
+    
+    async def create_monitoring_job(
+        self,
+        config_id: str,
+        competitor: str,
+        aspects: List[str],
+        frequency_hours: float,
+        user_id: str,
+        notification_preference: str = "significant",
+        existing_job_id: Optional[str] = None
+    ) -> str:
+        """
+        Create and schedule a monitoring job.
+        
+        Args:
+            config_id: Monitoring configuration ID
+            competitor: Competitor name to monitor
+            aspects: List of aspects to monitor (products, pricing, social, news)
+            frequency_hours: How often to run (in hours)
+            user_id: User ID who created the job
+            notification_preference: When to send notifications (always/significant/never)
+            existing_job_id: Optional existing job ID to reuse (for startup restoration)
+            
+        Returns:
+            job_id: Generated job ID
+        """
+        # Check if a job already exists for this config
+        config_doc = self.firestore.collection('monitoring_configs').document(config_id).get()
+        if config_doc.exists:
+            config_data = config_doc.to_dict()
+            existing_apscheduler_job_id = config_data.get('apscheduler_job_id')
+            
+            # If job already exists and we're not restoring, don't create a duplicate
+            if existing_apscheduler_job_id and not existing_job_id:
+                logger.warning(f"Job already exists for config {config_id}: {existing_apscheduler_job_id}")
+                return existing_apscheduler_job_id
+        
+        # Use existing job ID if provided, otherwise generate new one
+        job_id = existing_job_id or f"monitor_{uuid.uuid4().hex[:8]}"
+        
+        # Calculate next run time (10 seconds from now for first run)
+        next_run = datetime.utcnow() + timedelta(seconds=10)
+        
+        try:
+            min_seconds = 60
+            interval_seconds = max(min_seconds, int(frequency_hours * 3600))
+
+            # Add job to APScheduler
+            self.scheduler.add_job(
+                func=self._execute_monitoring_task,
+                trigger=IntervalTrigger(seconds=interval_seconds),
+                id=job_id,
+                args=[config_id, competitor, aspects, user_id, notification_preference],
+                replace_existing=True,
+                next_run_time=next_run
+            )
+            
+            logger.info(f"Created APScheduler job: {job_id} for {competitor}")
+            
+            # Save job metadata to Firestore
+            self.firestore.collection('cron_jobs').document(job_id).set({
+                'config_id': config_id,
+                'apscheduler_id': job_id,
+                'status': 'running',
+                'created_at': firestore.SERVER_TIMESTAMP,
+                'next_run': next_run,
+                'error_count': 0,
+                'last_execution': None,
+                'last_error': None
+            })
+            
+            # Update monitoring config with job ID
+            self.firestore.collection('monitoring_configs').document(config_id).update({
+                'apscheduler_job_id': job_id,
+                'status': 'active',
+                'updated_at': firestore.SERVER_TIMESTAMP
+            })
+            
+            logger.info(f"Cron job {job_id} created successfully")
+            return job_id
+            
+        except Exception as e:
+            logger.error(f"Failed to create monitoring job: {e}")
+            raise
+    
+    async def _execute_monitoring_task(
+        self,
+        config_id: str,
+        competitor: str,
+        aspects: List[str],
+        user_id: str,
+        notification_preference: str
+    ):
+        """
+        Execute monitoring task (called by APScheduler).
+        This invokes the competitor agent with a monitoring prompt.
+        
+        Args:
+            config_id: Configuration ID
+            competitor: Competitor to monitor
+            aspects: Aspects to monitor
+            user_id: User ID
+            notification_preference: Notification preference
+        """
+        result_id = uuid.uuid4().hex
+        execution_time = datetime.utcnow()
+        
+        try:
+            logger.info(f"Executing monitoring task for {competitor} (config: {config_id})")
+            
+            if not self.competitor_agent_service:
+                raise RuntimeError("CompetitorAgentService not initialized")
+            
+            # Build monitoring prompt for the agent
+            # IMPORTANT: use search-only language to avoid triggering create_monitoring_config (HITL)
+            aspects_str = ", ".join(aspects) if aspects else "all aspects"
+            monitoring_prompt = (
+                f"Use search_competitor and search_competitor_news to research {competitor} "
+                f"focusing on these aspects: {aspects_str}. "
+                f"Find the latest updates, product changes, pricing changes, news, and any significant developments. "
+                f"Report a comprehensive summary of everything you find. "
+                f"Do NOT call create_monitoring_config or any cron job related tools or any hitl related tools, only use search tool and skills tool for this task"
+            )
+            
+            # Create a unique thread ID for this monitoring execution
+            thread_id = f"cron_{config_id}_{result_id}"
+            
+            # Invoke the agent with the monitoring prompt
+            logger.info(f"Invoking competitor agent for monitoring: {monitoring_prompt[:100]}...")
+            agent_response = await self.competitor_agent_service.invoke(
+                message=monitoring_prompt,
+                thread_id=thread_id,
+                user_id=user_id
+            )
+            
+            # Parse agent response into structured results
+            results = self._parse_agent_response(
+                response=agent_response,
+                competitor=competitor,
+                aspects=aspects
+            )
+            
+            # Save results to Firestore
+            self.firestore.collection('monitoring_results').document(result_id).set({
+                'config_id': config_id,
+                'competitor': competitor,
+                'aspects': aspects,
+                'execution_time': firestore.SERVER_TIMESTAMP,
+                'findings': results.get('findings', {}),
+                'is_significant': results.get('is_significant', False),
+                'significance_score': results.get('significance_score', 0),
+                'summary': results.get('summary', ''),
+                'notification_sent': False,
+                'user_id': user_id
+            })
+            
+            logger.info(f"Monitoring results saved: {result_id}")
+            
+            # Save as chat message for proactive notification
+            await self._save_monitoring_as_chat_message(
+                user_id=user_id,
+                competitor=competitor,
+                aspects=aspects,
+                results=results,
+                result_id=result_id,
+                execution_time=execution_time
+            )
+            
+            # Send notification if needed
+            should_notify = (
+                (notification_preference == "always") or
+                (notification_preference == "significant" and results.get('is_significant', False))
+            )
+            
+            if should_notify:
+                try:
+                    if not self.notification_service:
+                        logger.warning("NotificationService not initialized, skipping notification")
+                    else:
+                        await self.notification_service.send_monitoring_notification(
+                            user_id=user_id,
+                            competitor=competitor,
+                            findings=results.get('findings', {}),
+                            summary=results.get('summary', ''),
+                            significance_score=results.get('significance_score', 0),
+                            reasons=results.get('reasons', [])
+                        )
+                    
+                        # Update notification status
+                        self.firestore.collection('monitoring_results').document(result_id).update({
+                            'notification_sent': True
+                        })
+                        
+                        logger.info(f"Notification sent for {result_id}")
+                except Exception as notif_error:
+                    logger.error(f"Failed to send notification: {notif_error}")
+            
+            # Reset error count on successful execution
+            job = self.scheduler.get_job(self._get_job_id_from_config(config_id))
+            if job:
+                try:
+                    # Check if document exists before updating
+                    job_doc = self.firestore.collection('cron_jobs').document(job.id).get()
+                    if job_doc.exists:
+                        self.firestore.collection('cron_jobs').document(job.id).update({
+                            'error_count': 0,
+                            'last_execution': firestore.SERVER_TIMESTAMP,
+                            'last_error': None
+                        })
+                    else:
+                        logger.warning(f"Cron job document {job.id} not found in Firestore, skipping update")
+                except Exception as update_error:
+                    logger.warning(f"Failed to update job status in Firestore: {update_error}")
+            
+            logger.info(f"Monitoring task completed successfully for {competitor}")
+            
+        except Exception as e:
+            logger.error(f"Monitoring task failed for {competitor}: {e}", exc_info=True)
+            
+            # Increment error count
+            try:
+                job_doc = self.firestore.collection('cron_jobs').where(
+                    'config_id', '==', config_id
+                ).limit(1).get()
+                
+                if job_doc:
+                    job_data = job_doc[0].to_dict()
+                    error_count = job_data.get('error_count', 0) + 1
+                    job_id = job_doc[0].id
+                    
+                    self.firestore.collection('cron_jobs').document(job_id).update({
+                        'error_count': error_count,
+                        'last_error': str(e),
+                        'last_execution': firestore.SERVER_TIMESTAMP,
+                        'status': 'failed' if error_count >= 3 else 'running'
+                    })
+                    
+                    # Pause job if too many errors
+                    if error_count >= 3:
+                        logger.warning(f"Job {job_id} paused due to repeated failures")
+                        self.scheduler.pause_job(job_id)
+            except Exception as update_error:
+                logger.error(f"Failed to update error count: {update_error}")
+    
+    def _parse_agent_response(
+        self,
+        response: str,
+        competitor: str,
+        aspects: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Parse agent's text response into structured monitoring results.
+        
+        Args:
+            response: Agent's text response
+            competitor: Competitor name
+            aspects: Aspects that were monitored
+            
+        Returns:
+            Dict with findings, significance, score, and summary
+        """
+        try:
+            # The agent's response is a comprehensive text summary
+            # We'll use it as the summary and store it in findings
+            
+            # Calculate significance based on response length and keywords
+            response_lower = response.lower()
+            significance_keywords = [
+                'significant', 'important', 'major', 'critical', 'breaking',
+                'new product', 'price change', 'launched', 'announced',
+                'update', 'change', 'shift', 'expansion', 'acquisition'
+            ]
+            
+            # Count keyword matches
+            keyword_matches = sum(1 for keyword in significance_keywords if keyword in response_lower)
+            
+            # Calculate significance score (0-100)
+            # Based on response length and keyword density
+            base_score = min(30, len(response) // 50)  # Up to 30 points for length
+            keyword_score = min(70, keyword_matches * 10)  # Up to 70 points for keywords
+            significance_score = base_score + keyword_score
+            
+            # Determine if significant (threshold: 40)
+            is_significant = significance_score >= 40
+            
+            # Extract reasons (keywords found)
+            reasons = [
+                f"Found '{keyword}' in monitoring results"
+                for keyword in significance_keywords
+                if keyword in response_lower
+            ]
+            if not reasons:
+                reasons = ["Routine monitoring completed with no significant changes"]
+            
+            return {
+                'findings': {
+                    'agent_response': response,
+                    'competitor': competitor,
+                    'aspects': aspects
+                },
+                'is_significant': is_significant,
+                'significance_score': significance_score,
+                'reasons': reasons,
+                'summary': response,
+                'aspects': aspects
+            }
+            
+        except Exception as e:
+            logger.error(f"Error parsing agent response: {e}", exc_info=True)
+            # Return minimal structure on error
+            return {
+                'findings': {'agent_response': response},
+                'is_significant': False,
+                'significance_score': 0,
+                'reasons': ['Error parsing response'],
+                'summary': response if response else 'No response available',
+                'aspects': aspects
+            }
+    
+    def _get_job_id_from_config(self, config_id: str) -> Optional[str]:
+        """Helper to get job ID from config ID"""
+        # This would need to query Firestore, but for now we can use the scheduler
+        for job in self.scheduler.get_jobs():
+            if job.args and job.args[0] == config_id:
+                return job.id
+        return None
+    
+    async def _save_monitoring_as_chat_message(
+        self,
+        user_id: str,
+        competitor: str,
+        aspects: List[str],
+        results: Dict[str, Any],
+        result_id: str,
+        execution_time: datetime
+    ):
+        """
+        Save monitoring results as a chat message for proactive notification.
+        Uses a dedicated monitoring thread per user: `monitoring_{user_id}`
+        
+        Args:
+            user_id: User ID
+            competitor: Competitor name
+            aspects: Monitored aspects
+            results: Monitoring results
+            result_id: Result document ID
+            execution_time: When the monitoring was executed
+        """
+        try:
+            # Format the message content
+            significance = "🔴 Significant" if results.get('is_significant') else "🟢 Normal"
+            score = results.get('significance_score', 0)
+            summary = results.get('summary', 'No summary available')
+            
+            # Build detailed findings
+            findings_text = ""
+            if 'findings' in results:
+                findings = results['findings']
+                if isinstance(findings, dict):
+                    for aspect, data in findings.items():
+                        if isinstance(data, dict):
+                            findings_text += f"\n**{aspect.capitalize()}:**\n"
+                            if 'summary' in data:
+                                findings_text += f"{data['summary']}\n"
+                            elif 'articles' in data and data['articles']:
+                                for article in data['articles'][:3]:  # Top 3 articles
+                                    if isinstance(article, dict):
+                                        title = article.get('title', 'No title')
+                                        findings_text += f"  • {title}\n"
+            
+            message_content = f"""**🔍 Competitor Monitoring Update**
+
+**Competitor:** {competitor}
+**Aspects Monitored:** {', '.join(aspects)}
+**Status:** {significance} (Score: {score}/100)
+**Time:** {execution_time.strftime('%Y-%m-%d %H:%M UTC')}
+
+**Summary:**
+{summary}
+{findings_text}
+
+_Result ID: {result_id}_
+"""
+            
+            # Get user's active thread (where they're currently chatting)
+            active_thread_id = await self.chat_history.get_active_thread(user_id)
+            
+            # Fallback to default thread if no active thread
+            if not active_thread_id:
+                active_thread_id = f"default_{user_id}"
+                logger.info(f"No active thread found for user {user_id}, using default thread")
+            
+            # Save monitoring update to the user's active chat thread
+            await self.chat_history.save_message(
+                thread_id=active_thread_id,
+                user_id=user_id,
+                role='system',
+                content=message_content,
+                agent='monitoring_cron',
+                metadata={
+                    'type': 'monitoring_update',
+                    'competitor': competitor,
+                    'aspects': aspects,
+                    'is_significant': results.get('is_significant', False),
+                    'significance_score': score,
+                    'result_id': result_id,
+                    'config_id': results.get('config_id', '')
+                }
+            )
+            
+            logger.info(f"Saved monitoring result to active thread {active_thread_id} for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save monitoring as chat message: {e}", exc_info=True)
+    
+    async def pause_job(self, job_id: str) -> Dict[str, str]:
+        """
+        Pause a monitoring job and clean up any orphaned jobs for the same config.
+        
+        Args:
+            job_id: Job ID to pause
+            
+        Returns:
+            Status dict
+        """
+        try:
+            # Get the config_id for this job
+            job_doc = self.firestore.collection('cron_jobs').document(job_id).get()
+            config_id = None
+            if job_doc.exists:
+                config_id = job_doc.to_dict().get('config_id')
+            
+            # Pause the job in APScheduler
+            try:
+                self.scheduler.pause_job(job_id)
+            except Exception as e:
+                logger.warning(f"Job {job_id} not found in scheduler: {e}")
+            
+            # Update job status in Firestore (check if document exists first)
+            try:
+                job_doc = self.firestore.collection('cron_jobs').document(job_id).get()
+                if job_doc.exists:
+                    self.firestore.collection('cron_jobs').document(job_id).update({
+                        'status': 'paused',
+                        'updated_at': firestore.SERVER_TIMESTAMP
+                    })
+                else:
+                    logger.warning(f"Cron job document {job_id} not found in Firestore, skipping update")
+            except Exception as update_error:
+                logger.warning(f"Failed to update job status in Firestore: {update_error}")
+            
+            # Clean up any orphaned jobs for this config
+            if config_id:
+                await self._cleanup_orphaned_jobs_for_config(config_id, job_id)
+            
+            logger.info(f"Job {job_id} paused")
+            return {"status": "paused", "job_id": job_id}
+            
+        except Exception as e:
+            logger.error(f"Failed to pause job {job_id}: {e}")
+            raise
+    
+    async def resume_job(self, job_id: str) -> Dict[str, str]:
+        """
+        Resume a paused job.
+        
+        Args:
+            job_id: Job ID to resume
+            
+        Returns:
+            Status dict
+        """
+        try:
+            # Try to resume in APScheduler
+            try:
+                self.scheduler.resume_job(job_id)
+            except Exception as e:
+                # Job might not exist in scheduler, need to reload it
+                logger.warning(f"Job {job_id} not found in scheduler, attempting to reload: {e}")
+                
+                # Get config and reload job
+                job_doc = self.firestore.collection('cron_jobs').document(job_id).get()
+                if job_doc.exists:
+                    job_data = job_doc.to_dict()
+                    config_id = job_data.get('config_id')
+                    
+                    config_doc = self.firestore.collection('monitoring_configs').document(config_id).get()
+                    if config_doc.exists:
+                        config_data = config_doc.to_dict()
+                        
+                        # Recreate the job
+                        await self.create_monitoring_job(
+                            config_id=config_id,
+                            competitor=config_data.get('competitor'),
+                            aspects=config_data.get('aspects', []),
+                            frequency_hours=config_data.get('frequency_hours'),
+                            user_id=config_data.get('user_id'),
+                            notification_preference=config_data.get('notification_preference', 'significant'),
+                            existing_job_id=job_id
+                        )
+                        logger.info(f"Job {job_id} recreated and resumed")
+            
+            # Update status in Firestore (check if document exists first)
+            try:
+                job_doc_check = self.firestore.collection('cron_jobs').document(job_id).get()
+                if job_doc_check.exists:
+                    self.firestore.collection('cron_jobs').document(job_id).update({
+                        'status': 'running',
+                        'updated_at': firestore.SERVER_TIMESTAMP,
+                        'error_count': 0  # Reset error count on resume
+                    })
+                else:
+                    logger.warning(f"Cron job document {job_id} not found in Firestore, skipping update")
+            except Exception as update_error:
+                logger.warning(f"Failed to update job status in Firestore: {update_error}")
+            
+            logger.info(f"Job {job_id} resumed")
+            return {"status": "running", "job_id": job_id}
+            
+        except Exception as e:
+            logger.error(f"Failed to resume job {job_id}: {e}")
+            raise
+    
+    async def delete_job(self, job_id: str) -> Dict[str, str]:
+        """
+        Delete a monitoring job and clean up any orphaned jobs for the same config.
+        
+        Args:
+            job_id: Job ID to delete
+            
+        Returns:
+            Status dict
+        """
+        try:
+            # Get config ID before deleting job record
+            job_doc = self.firestore.collection('cron_jobs').document(job_id).get()
+            config_id = None
+            
+            if job_doc.exists:
+                job_data = job_doc.to_dict()
+                config_id = job_data.get('config_id')
+            
+            # Remove from APScheduler
+            try:
+                self.scheduler.remove_job(job_id)
+            except Exception as e:
+                logger.warning(f"Job {job_id} not found in scheduler: {e}")
+            
+            # Delete job record from Firestore
+            if job_doc.exists:
+                self.firestore.collection('cron_jobs').document(job_id).delete()
+            
+            # Clean up any orphaned jobs for this config
+            if config_id:
+                await self._cleanup_orphaned_jobs_for_config(config_id, None)
+                
+                # Update monitoring config status
+                self.firestore.collection('monitoring_configs').document(config_id).update({
+                    'status': 'deleted',
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
+            
+            logger.info(f"Job {job_id} deleted")
+            return {"status": "deleted", "job_id": job_id}
+            
+        except Exception as e:
+            logger.error(f"Failed to delete job {job_id}: {e}")
+            raise
+
+    async def delete_jobs(self, job_ids: List[str]) -> Dict[str, Any]:
+        """
+        Delete multiple monitoring jobs.
+
+        Args:
+            job_ids: List of job IDs to delete
+
+        Returns:
+            Summary of deletions
+        """
+        deleted = 0
+        errors: List[str] = []
+
+        for job_id in job_ids:
+            try:
+                await self.delete_job(job_id)
+                deleted += 1
+            except Exception as e:
+                errors.append(f"{job_id}: {str(e)}")
+
+        return {
+            "status": "completed",
+            "deleted": deleted,
+            "requested": len(job_ids),
+            "errors": errors
+        }
+
+    async def update_job(self, job_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update a monitoring job's configuration and schedule.
+
+        Supported updates: frequency_hours, aspects, notification_preference.
+        """
+        try:
+            job_doc = self.firestore.collection('cron_jobs').document(job_id).get()
+            if not job_doc.exists:
+                raise ValueError(f"Job {job_id} not found")
+
+            job_data = job_doc.to_dict()
+            config_id = job_data.get('config_id')
+            if not config_id:
+                raise ValueError(f"Job {job_id} missing config_id")
+
+            config_updates: Dict[str, Any] = {
+                'updated_at': firestore.SERVER_TIMESTAMP
+            }
+
+            if 'frequency_hours' in updates and updates['frequency_hours'] is not None:
+                frequency_hours = float(updates['frequency_hours'])
+                min_hours = 1 / 60
+                if frequency_hours < min_hours:
+                    frequency_hours = min_hours
+
+                interval_seconds = max(60, int(frequency_hours * 3600))
+                self.scheduler.reschedule_job(
+                    job_id,
+                    trigger=IntervalTrigger(seconds=interval_seconds)
+                )
+
+                config_updates['frequency_hours'] = frequency_hours
+                if frequency_hours < 1:
+                    config_updates['frequency_label'] = f"Every {round(frequency_hours * 60)} min"
+                else:
+                    config_updates['frequency_label'] = f"Every {frequency_hours}h"
+
+            if 'aspects' in updates and updates['aspects'] is not None:
+                config_updates['aspects'] = updates['aspects']
+
+            if 'notification_preference' in updates and updates['notification_preference'] is not None:
+                config_updates['notification_preference'] = updates['notification_preference']
+
+            if config_updates:
+                self.firestore.collection('monitoring_configs').document(config_id).update(config_updates)
+                # Update job timestamp (check if document exists first)
+                try:
+                    job_doc_check = self.firestore.collection('cron_jobs').document(job_id).get()
+                    if job_doc_check.exists:
+                        self.firestore.collection('cron_jobs').document(job_id).update({
+                            'updated_at': firestore.SERVER_TIMESTAMP
+                        })
+                    else:
+                        logger.warning(f"Cron job document {job_id} not found in Firestore, skipping update")
+                except Exception as update_error:
+                    logger.warning(f"Failed to update job timestamp in Firestore: {update_error}")
+
+            logger.info(f"Job {job_id} updated")
+            return {"status": "updated", "job_id": job_id}
+
+        except Exception as e:
+            logger.error(f"Failed to update job {job_id}: {e}")
+            raise
+    
+    async def list_jobs(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        List all jobs for a user.
+        
+        Args:
+            user_id: User ID to filter jobs
+            
+        Returns:
+            List of job details
+        """
+        try:
+            # Get all active monitoring configs for user
+            configs = self.firestore.collection('monitoring_configs').where(
+                'user_id', '==', user_id
+            ).get()
+            
+            jobs = []
+            for config_doc in configs:
+                config_data = config_doc.to_dict()
+                if config_data.get('status') not in ['active', 'paused']:
+                    continue
+                job_id = config_data.get('apscheduler_job_id')
+                
+                if job_id:
+                    # Get job status from cron_jobs collection
+                    job_doc = self.firestore.collection('cron_jobs').document(job_id).get()
+                    
+                    if job_doc.exists:
+                        job_data = job_doc.to_dict()
+                        
+                        # Get next run time from scheduler
+                        scheduler_job = self.scheduler.get_job(job_id)
+                        next_run = scheduler_job.next_run_time if scheduler_job else None
+                        
+                        jobs.append({
+                            'id': config_doc.id,
+                            'job_id': job_id,
+                            'competitor': config_data.get('competitor'),
+                            'aspects': config_data.get('aspects', []),
+                            'frequency_hours': config_data.get('frequency_hours'),
+                            'notification_preference': config_data.get('notification_preference'),
+                            'status': job_data.get('status'),
+                            'created_at': config_data.get('created_at'),
+                            'next_run': next_run,
+                            'last_execution': job_data.get('last_execution'),
+                            'error_count': job_data.get('error_count', 0),
+                            'last_error': job_data.get('last_error')
+                        })
+            
+            return jobs
+            
+        except Exception as e:
+            logger.error(f"Failed to list jobs for user {user_id}: {e}")
+            raise
+    
+    async def get_job_results(
+        self,
+        config_id: str,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recent results for a monitoring job.
+        
+        Args:
+            config_id: Configuration ID
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of monitoring results
+        """
+        try:
+            results_query = self.firestore.collection('monitoring_results').where(
+                'config_id', '==', config_id
+            ).order_by('execution_time', direction=firestore.Query.DESCENDING).limit(limit)
+            
+            results_docs = results_query.get()
+            
+            results = []
+            for doc in results_docs:
+                data = doc.to_dict()
+                data['id'] = doc.id
+                results.append(data)
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Failed to get job results for {config_id}: {e}")
+            raise
+    
+    async def load_jobs_on_startup(self):
+        """
+        Load active jobs from Firestore on server startup.
+        This loads from monitoring_configs instead of cron_jobs to prevent duplicates.
+        """
+        try:
+            logger.info("Loading active monitoring jobs from Firestore...")
+            
+            # Get all active/paused monitoring configs (NOT cron_jobs to avoid duplicates)
+            configs = self.firestore.collection('monitoring_configs').where(
+                'status', 'in', ['active', 'paused']
+            ).get()
+            
+            loaded_count = 0
+            for config_doc in configs:
+                config_data = config_doc.to_dict()
+                config_id = config_doc.id
+                existing_job_id = config_data.get('apscheduler_job_id')
+                
+                # Get the job status from cron_jobs collection
+                job_status = 'running'
+                if existing_job_id:
+                    job_doc = self.firestore.collection('cron_jobs').document(existing_job_id).get()
+                    if job_doc.exists:
+                        job_status = job_doc.to_dict().get('status', 'running')
+                
+                try:
+                    # Recreate job with the SAME job ID to avoid duplicates
+                    await self.create_monitoring_job(
+                        config_id=config_id,
+                        competitor=config_data.get('competitor'),
+                        aspects=config_data.get('aspects', []),
+                        frequency_hours=config_data.get('frequency_hours'),
+                        user_id=config_data.get('user_id'),
+                        notification_preference=config_data.get('notification_preference', 'significant'),
+                        existing_job_id=existing_job_id  # Reuse the same job ID
+                    )
+                    
+                    # If job was paused, pause it again
+                    if job_status == 'paused' and existing_job_id:
+                        try:
+                            self.scheduler.pause_job(existing_job_id)
+                            logger.info(f"Restored paused job: {existing_job_id}")
+                        except Exception as e:
+                            logger.warning(f"Could not pause restored job {existing_job_id}: {e}")
+                    
+                    loaded_count += 1
+                    
+                except Exception as job_error:
+                    logger.error(f"Failed to load job for config {config_id}: {job_error}")
+                    continue
+            
+            logger.info(f"Loaded {loaded_count} monitoring jobs on startup")
+            
+            # Clean up any orphaned jobs
+            await self._cleanup_all_orphaned_jobs()
+            
+        except Exception as e:
+            logger.error(f"Failed to load jobs on startup: {e}")
+            # Don't raise - continue app startup even if job loading fails
+    
+    async def _cleanup_orphaned_jobs_for_config(self, config_id: str, keep_job_id: Optional[str]):
+        """
+        Clean up orphaned jobs for a specific config.
+        
+        Args:
+            config_id: Config ID to clean up jobs for
+            keep_job_id: Job ID to keep (None to delete all)
+        """
+        try:
+            # Find all jobs for this config
+            jobs = self.firestore.collection('cron_jobs').where(
+                'config_id', '==', config_id
+            ).get()
+            
+            for job_doc in jobs:
+                job_id = job_doc.id
+                if job_id != keep_job_id:
+                    # Remove from scheduler
+                    try:
+                        self.scheduler.remove_job(job_id)
+                    except Exception:
+                        pass  # Job might not exist in scheduler
+                    
+                    # Remove from Firestore
+                    self.firestore.collection('cron_jobs').document(job_id).delete()
+                    logger.info(f"Cleaned up orphaned job: {job_id}")
+        except Exception as e:
+            logger.error(f"Failed to cleanup orphaned jobs for config {config_id}: {e}")
+    
+    async def _cleanup_all_orphaned_jobs(self):
+        """
+        Clean up all orphaned jobs (not referenced by any active config).
+        """
+        try:
+            logger.info("Cleaning up orphaned jobs...")
+            
+            # Get all active config job IDs
+            configs = self.firestore.collection('monitoring_configs').where(
+                'status', 'in', ['active', 'paused']
+            ).get()
+            
+            valid_job_ids = set()
+            for config in configs:
+                job_id = config.to_dict().get('apscheduler_job_id')
+                if job_id:
+                    valid_job_ids.add(job_id)
+            
+            # Find and remove orphaned jobs
+            all_jobs = self.firestore.collection('cron_jobs').stream()
+            orphaned_count = 0
+            
+            for job_doc in all_jobs:
+                job_id = job_doc.id
+                if job_id not in valid_job_ids:
+                    # Remove from scheduler
+                    try:
+                        self.scheduler.remove_job(job_id)
+                    except Exception:
+                        pass
+                    
+                    # Remove from Firestore
+                    self.firestore.collection('cron_jobs').document(job_id).delete()
+                    orphaned_count += 1
+                    logger.info(f"Removed orphaned job: {job_id}")
+            
+            if orphaned_count > 0:
+                logger.info(f"Cleaned up {orphaned_count} orphaned jobs")
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup orphaned jobs: {e}")
+    
+    def shutdown(self):
+        """Shutdown the scheduler gracefully"""
+        if self.scheduler.running:
+            self.scheduler.shutdown(wait=True)
+            self._scheduler_started = False
+            logger.info("APScheduler shut down successfully")
