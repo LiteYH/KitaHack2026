@@ -381,15 +381,18 @@ export function useAgentChat(userId?: string, userEmail?: string): UseAgentChatR
         }
 
         case 'done':
-          // Attach any pending ROI charts to the last assistant message
+          // Attach any pending ROI charts to the last assistant message.
+          // IMPORTANT: capture finalMessage into a local variable BEFORE calling setMessages,
+          // because currentMessageRef.current is nulled immediately after and React's state
+          // updater runs asynchronously — accessing the ref inside the updater would see null.
           if (pendingChartsRef.current && currentMessageRef.current) {
             const pending = pendingChartsRef.current;
-            currentMessageRef.current.charts = pending.charts;
-            currentMessageRef.current.filterContext = pending.filterContext;
-            setMessages((prev) => {
-              const filtered = prev.filter((m) => m.id !== currentMessageRef.current?.id);
-              return [...filtered, { ...currentMessageRef.current! }];
-            });
+            const finalMessage: ChatMessage = {
+              ...currentMessageRef.current,
+              charts: pending.charts,
+              filterContext: pending.filterContext,
+            };
+            setMessages((prev) => prev.map((m) => m.id === finalMessage.id ? finalMessage : m));
             pendingChartsRef.current = null;
           }
           setIsLoading(false);
