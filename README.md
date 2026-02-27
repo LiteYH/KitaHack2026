@@ -1,4 +1,4 @@
-﻿# BossolutionAI
+# BossolutionAI
 
 **AI-Powered Marketing Intelligence Platform for SMEs**
 
@@ -17,7 +17,9 @@ Built for KitaHack 2026  an end-to-end multi-agent system that helps small busin
 ## Table of Contents
 
 - [Overview](#overview)
-- [Features](#features)
+- [Problem Overview](#problem-overview)
+- [SDG Alignment](#sdg-alignment)
+- [Key Features](#key-features)
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
@@ -28,13 +30,21 @@ Built for KitaHack 2026  an end-to-end multi-agent system that helps small busin
 - [HITL Approval Flow](#hitl-approval-flow)
 - [Continuous Monitoring](#continuous-monitoring)
 - [Generative UI](#generative-ui)
+- [Development](#development)
+- [Challenges Faced](#challenges-faced)
+- [Future Roadmap](#future-roadmap)
 - [Team](#team)
+- [Acknowledgements](#acknowledgements)
 
 ---
 
 ## Overview
 
 BossolutionAI is a full-stack AI assistant designed for SME marketing teams. Unlike generic chatbots, it uses a **multi-agent LangGraph architecture** where a Supervisor Agent orchestrates specialised subagents  each with its own tools, skills, and memory. All agent reasoning is streamed live to the user via Server-Sent Events (SSE), and the system supports **Human-in-the-Loop (HITL)** approval gates so no automated action is ever taken without user consent.
+
+### Short Description of the Solution
+
+At a high level, BossolutionAI acts like an **AI marketing co-pilot** for SMEs: it ingests campaign metrics, competitor signals, and business goals, then turns them into **clear recommendations, content plans, and ROI insights**. Instead of forcing founders to interpret dashboards, the system answers concrete questions such as _“Which ads should I pause?”_ or _“What content should I post next week?”_ through a conversational interface backed by specialised agents.
 
 ```
 User -> /chat -> Supervisor Agent (Gemini 2.5 Flash)
@@ -46,7 +56,40 @@ User -> /chat -> Supervisor Agent (Gemini 2.5 Flash)
 
 ---
 
-## Features
+## Problem Overview
+
+**Core Issue**
+
+### Data Without Actionable Insight
+
+Existing platforms like Meta and YouTube expose raw dashboards, but they do **not translate metrics into business decisions**. Many SMEs cannot interpret ROI, CTR, or campaign performance effectively, which leads to guesswork and wasted budget. **47% of Malaysian SMEs report negative or unmeasurable ROI from digital marketing**, and globally SMEs waste **USD 37 billion annually** on ineffective ads that are not properly optimised.
+
+### Growing Digital and Competitive Gap
+
+Only **33% of small firms** adopt advanced digital tools compared to larger enterprises, largely due to skill and capital constraints. As **AI adoption in marketing is projected to reach 78% by 2026**, SMEs risk falling even further behind. Without **accessible, intelligent support**, the digital divide widens: large brands move faster with data-driven optimisation, while SMEs struggle to keep up, threatening their **sustainability and growth**.
+
+### Marketing Expertise and Cost Barrier
+
+SMEs in Malaysia and across ASEAN face a **double barrier**: limited digital marketing expertise and high agency fees of **RM3,000–15,000 per month**. **76% of Malaysian SMEs** cite lack of digital marketing knowledge as their main growth barrier. Although SMEs form **over 90% of businesses** and contribute around **40% of regional GDP**, most cannot afford enterprise-level marketing tools or specialists. BossolutionAI is designed specifically to close this gap by **embedding expert-like reasoning into an affordable AI assistant**.
+
+---
+
+## SDG Alignment
+
+BossolutionAI is aligned with multiple UN Sustainable Development Goals (SDGs) by helping SMEs compete fairly in the digital economy:
+
+- **SDG 8 – Decent Work and Economic Growth**  
+  By turning raw marketing data into actionable insights, BossolutionAI helps SMEs **improve campaign efficiency, grow revenue, and create more resilient jobs** without needing expensive agencies.
+
+- **SDG 9 – Industry, Innovation and Infrastructure**  
+  The project showcases an **innovative multi-agent AI infrastructure** that gives small businesses access to advanced analytics, automation, and AI-driven decision support typically reserved for large enterprises.
+
+- **SDG 10 – Reduced Inequalities**  
+  By lowering the expertise and cost barrier for effective digital marketing, BossolutionAI helps **narrow the digital divide** between small and large companies, especially in emerging markets like Malaysia and ASEAN.
+
+---
+
+## Key Features
 
 ### Competitor Intelligence
 - **Live web research** via Tavily Search API across products, pricing, social media, and news
@@ -549,7 +592,45 @@ Built for **KitaHack 2026**  Google Hackathon Malaysia.
 
 | Member | Focus Area |
 |---|---|
-| Ng Zheng Jie | Competitor Monitoring Agent, HITL, Cron Pipeline, LangGraph architecture |
+| Cheng Kai Huang | Content planning agent, content calendar design, prompt strategy for social content, and end-to-end content workflow UX. |
+| Lim Jia Lih | ROI modelling, KPI and business-metric definition, ROI analysis tool, and reporting views that translate metrics into business language. |
+| Ong Yi Hao | Campaign optimisation engine, campaign analytics (CPC/CTR/ROAS), and AI recommendations for scaling, pausing, and reallocating budgets. |
+| Ng Zheng Jie | Multi-agent architecture, competitor monitoring agent, HITL approval flow, cron pipeline, and LangGraph orchestration. |
+
+---
+
+## Challenges Faced
+
+- **Turning noisy marketing data into clear decisions**  
+  Designing prompts, schemas, and agents that consistently transform CTR/ROAS/ROI into **business-friendly recommendations** (e.g. _“Pause Ad Set B and shift 20% budget to Ad Set A”_) required extensive iteration and domain tuning.
+
+- **Balancing automation with human control (HITL)**  
+  We needed to ensure that automation never feels “unsafe” for SMEs. Implementing **interrupt-driven HITL flows** in LangGraph and exposing them cleanly in the UI was non-trivial, especially around multi-step approvals and cron creation.
+
+- **Maintaining streaming UX across agents and tools**  
+  Coordinating **SSE token streaming**, tool-call bubbles, and GenUI components across multiple agents while keeping the chat responsive and understandable demanded careful state management on both frontend and backend.
+
+- **Modelling ROI realistically for SMEs**  
+  ROI calculations had to stay **trustworthy yet flexible** across industries with different funnels and attribution realities. We iterated on schemas, time windows, and explanation text so non-technical founders could still trust and act on the insights.
+
+---
+
+## Future Roadmap
+
+- **Deeper platform integrations**  
+  Direct connectors to Meta Ads, Google Ads, TikTok, and YouTube to ingest real campaign data instead of mock or manually entered metrics.
+
+- **Budget simulation and scenario planning**  
+  “What-if” simulations that let SMEs test **budget shifts, new channels, or campaign strategies** before committing real spend.
+
+- **Richer content operations**  
+  Exportable content calendars, collaboration features for small teams, and direct publishing hooks to social platforms.
+
+- **Industry-specific playbooks**  
+  Tuned prompts, KPIs, and best practices **per vertical** (e.g. F&B, fashion, services) so SMEs get recommendations that understand their context.
+
+- **Multi-language support for ASEAN**  
+  Support for Bahasa Malaysia, Mandarin, and other regional languages so non-English-speaking founders can fully leverage the assistant.
 
 ---
 
