@@ -215,14 +215,27 @@ After Firebase is fully configured:
 
 ### Frontend (`.env.local`)
 ```env
-NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyCfQ6S1s9Plr5GyPHcioCTiRNGUHpG8I0Y
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=kitahack2026-8feed.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=kitahack2026-8feed
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=kitahack2026-8feed.firebasestorage.app
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=164072170434
-NEXT_PUBLIC_FIREBASE_APP_ID=1:164072170434:web:e7a5557ea2444081b22c5b
-NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-5M7F30K0GC
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+# Google Gemini
+GOOGLE_API_KEY=your_gemini_api_key
+
+# Tavily (competitor web search)
+TAVILY_API_KEY=your_tavily_api_key
+
+# Firebase Admin SDK
+FIREBASE_PROJECT_ID=your_project_id
+FIREBASE_PRIVATE_KEY_ID=your_private_key_id
+FIREBASE_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n..."
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxx@your-project.iam.gserviceaccount.com
+FIREBASE_CLIENT_ID=your_client_id
+FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth
+FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token
+
+# Email notifications
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@gmail.com
+SMTP_PASSWORD=your_app_password
+NOTIFICATION_FROM_EMAIL=noreply@bossolutionai.com
 ```
 
 ### Backend (`.env`)
@@ -234,8 +247,6 @@ FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY----
 FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@kitahack2026-8feed.iam.gserviceaccount.com
 FIREBASE_CLIENT_ID=your_client_id
 
-# AI APIs
-GOOGLE_API_KEY=AIzaSyBDM6cNkW5n6bc3eMIO2dlq5va3q64nKeo
 ```
 
 ## 🐛 Troubleshooting
